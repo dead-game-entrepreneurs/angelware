@@ -181,6 +181,7 @@ a database lock. Take a database backup before upgrading an existing installatio
 cannot use the new schema.
 
 Game packages and the extension workflow are described in [the architecture guide](docs/architecture.md).
+See [deployment and rollback](docs/deployment.md) before upgrading a hosted installation.
 
 ### Settings
 
