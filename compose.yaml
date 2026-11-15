@@ -32,7 +32,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - ./configs:/etc/angelware:ro
     environment:
+      ANGELWARE_CONFIG: ${ANGELWARE_CONFIG:-}
       ANGELWARE_PUBLIC_IP: ${ANGELWARE_PUBLIC_IP:?set ANGELWARE_PUBLIC_IP in .env}
       ANGELWARE_BIND: ${ANGELWARE_BIND:-0.0.0.0}
       ANGELWARE_PORT: ${ANGELWARE_PORT:-3074}

@@ -58,7 +58,11 @@ are separate and must be archived/deleted manually.
 Override `ANGELWARE_CAPTURE_HOURS`, `ANGELWARE_CAPTURE_MIB`,
 `ANGELWARE_CAPTURE_FREE_MIB` or
 `ANGELWARE_CAPTURE_INTERFACE` in the hosted `.env` as needed. The filter follows
-the configured game ports and whether BRO is enabled.
+the legacy port variables and whether BRO is enabled. For native or custom game UDP ports,
+set `ANGELWARE_CAPTURE_EXTRA_UDP_PORTS` to a comma-separated list. An OutRun native-relay
+installation needs `ANGELWARE_CAPTURE_EXTRA_UDP_PORTS=3658`. The sidecar does not infer
+listeners from the JSON game configuration. When that file is selected, set its `log_level`
+to `debug` as well; the JSON value takes precedence over the beta environment setting.
 
 Full packets and debug task payloads can expose password hashes, tickets, room
 keys, IP addresses, player names, messages, and other session material. Capture

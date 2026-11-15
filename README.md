@@ -19,7 +19,7 @@
 <p align="center">
   <a href="#dns-redirects">DNS redirects</a> ·
   <a href="#running-the-server">Running the server</a> ·
-  <a href="docs/svr2007-analysis.md">Protocol notes</a>
+  <a href="docs/games/svr2007/analysis.md">Protocol notes</a>
 </p>
 
 ---
@@ -29,6 +29,14 @@
 Supported games:
 
 - **WWE SmackDown vs. Raw 2007** (US, `SLUS-214.27`, v1.01): the full online service.
+- **OutRun 2006: Coast 2 Coast** (US PS2, `SLUS-212.74`): experimental auth, lobby,
+  matchmaking, statistics and ghost storage. Two unmodified PCSX2 clients have found a room,
+  joined and completed a race over native UDP 3658; both players' result writes were saved.
+  The retail ranking screen has read both saved rows back. An experimental
+  [PNACH and native relay](patches/outrun2006/README.md) adds automatic hosting in Sockets.
+  Two stock Flatpak clients have hosted, joined, completed a relay race and saved both results.
+  Synchronization quality, broader network coverage and ghost transfers need further testing.
+  See [OutRun setup and protocol notes](docs/games/outrun2006/analysis.md).
 - **Call of Duty 2: Big Red One** (US): NAT detection and connecting players, with an optional relay
   for players whose routers won't connect directly. Its lobby and matchmaking run on GameSpy
   (OpenSpy), not DemonWare, so angelware only replaces the DemonWare STUN part.
@@ -52,7 +60,7 @@ Supported games:
 | Change password, delete account, name checks | implemented, but the game never uses them |
 
 The retail game has been tested in PCSX2: two players signed up, found each other's session and played a
-match. Protocol notes are in [docs/svr2007-analysis.md](docs/svr2007-analysis.md).
+match. Protocol notes are in [docs/games/svr2007/analysis.md](docs/games/svr2007/analysis.md).
 
 ## How it fits together
 
@@ -61,7 +69,7 @@ match. Protocol notes are in [docs/svr2007-analysis.md](docs/svr2007-analysis.md
       │
       ├── DNAS check ──────────▶ community DNAS replacement (not part of angelware)
       ├── TCP 3074  ───────────▶ angelware: sign-up, login, lobby
-      ├── UDP 3074/3075 ───────▶ angelware: NAT detection and connecting players (SvR 2007)
+      ├── UDP 3074/3075 ───────▶ angelware: NAT detection (WWE and OutRun, separate server IPs)
       └── UDP 2273/2274 ───────▶ angelware: NAT detection and connecting players (CoD BRO)
                                      └── UDP 20000-20199: relay endpoints for CoD BRO peers
                                      │
@@ -69,6 +77,9 @@ match. Protocol notes are in [docs/svr2007-analysis.md](docs/svr2007-analysis.md
 ```
 
 angelware does **not** include a DNS server. You run your own and add the records below.
+OutRun's native room probes and race traffic use peer UDP 3658. Its current direct mode does
+not route those packets through WWE's adaptive relay. The optional PNACH transport uses
+OutRun's own authenticated relay on server UDP 3658; it requires the patch on every client.
 
 ## DNS redirects
 
@@ -143,6 +154,34 @@ angelware runs with host networking so it sees each player's real address, which
 PostgreSQL is only reachable from the machine itself. Stop with `docker compose down`; add `-v` only if
 you want to delete all accounts and stats.
 
+### Multiple games
+
+The original environment variables continue to start WWE and optional CoD BRO. To select games
+and give each its own network addresses, copy `configs/angelware.example.json` to
+`configs/angelware.json`, replace the example IPs, and set
+`ANGELWARE_CONFIG=/etc/angelware/angelware.json` in `.env`. Compose mounts `configs/` at that path.
+Outside Docker, set `ANGELWARE_CONFIG` to the local file path. The database URL can remain in
+`ANGELWARE_DATABASE_URL`; it does not need to appear in the JSON file.
+
+The JSON file selects enabled games. Each entry supplies `game`, `bind`, `public_ip`, optional
+`tcp_port`, `stun`, and game-specific `options`. Unknown game names and options fail startup.
+Defaults come from the game's definition. Empty `games` is an error.
+
+WWE and OutRun both expect UDP 3074/3075. Give them separate IP addresses assigned to the server
+and bind each game to its own address; direct its DNS names to that game's reachable IP.
+A wildcard bind overlaps every local address. Startup rejects conflicting discovery sockets.
+TCP listeners can share a socket when the auth title IDs differ, but DNS names cannot distinguish
+two games arriving on the same UDP socket. CoD BRO uses UDP 2273/2274 and can share WWE's IP.
+Behind NAT, forward each game's ports to its corresponding bind address.
+
+Account names and passwords are shared across games. Rooms, profiles, friends, mailbox, statistics,
+and uploaded files remain separate. Existing gameplay records migrate into `svr2007`; existing
+credentials become unified accounts. Numbered migrations run transactionally under
+a database lock. Take a database backup before upgrading an existing installation; older binaries
+cannot use the new schema.
+
+Game packages and the extension workflow are described in [the architecture guide](docs/architecture.md).
+
 ### Settings
 
 All set in `.env`:
@@ -199,7 +238,7 @@ controllable gameplay through both adaptive branches: blocked direct UDP trigger
 and verified game DATA/ACK cycles through the relay; a fresh unblocked room used direct game
 DATA/ACKs with no relay-port game traffic. Both players must sign in again and create a new room
 after enabling it. See
-[peer encryption and relay rewriting](docs/svr2007-peer-encryption.md).
+[peer encryption and relay rewriting](docs/games/svr2007/peer-encryption.md).
 
 `ANGELWARE_SVR_OBSERVER=on` observes the stock host's authenticated matchmaking updates.
 A fresh two-player room changing from fewer than two native peers to two can confirm prematch
@@ -235,19 +274,21 @@ No local Go install is needed; the toolchain runs in Docker:
 ```sh
 scripts/go test ./...
 scripts/go vet ./...
+scripts/test-postgres  # disposable database: migrations and isolation checks
 ```
 
-The PostgreSQL test in `internal/store` runs when `ANGELWARE_TEST_DATABASE_URL` points at a database.
+PostgreSQL tests in `internal/storage` run when `ANGELWARE_TEST_DATABASE_URL` points at a database.
 
 | Path | Contents |
 | --- | --- |
-| `cmd/angelware` | Settings and startup |
-| `internal/server` | TCP listener that sends each connection to login or the lobby |
-| `internal/auth` | Sign-up and login |
-| `internal/lobby` | Lobby connection, matchmaking, profiles, stats |
-| `internal/stun` | NAT detection, connecting players, relay (per game) |
-| `internal/store` | PostgreSQL (and in-memory storage for tests) |
-| `internal/bitbuf`, `frame`, `dwcrypto`, `session` | DemonWare's wire format, encryption and login tickets |
+| `cmd/angelware` | Explicit game registration and process entry point |
+| `internal/app` | Configuration, runtime composition and listeners |
+| `internal/game` | Game factory contracts |
+| `internal/protocol/dw` | Auth, gateway, tickets, bit buffers, framing and crypto |
+| `internal/services` | Shared room lifecycle, stats, social, mailbox and file services |
+| `internal/games` | Game-specific codecs, search policies, settings and peer behavior |
+| `internal/connectivity/stun` | Discovery, traversal and relay |
+| `internal/storage` | Game-scoped PostgreSQL and memory storage, numbered migrations |
 | `tools/` | Disc extraction helpers for reverse engineering. They need your own disc and are not used by the server |
 
 ### Game files

@@ -35,6 +35,16 @@ def capture_filter():
     if os.environ.get('ANGELWARE_BRO', 'on') != 'off':
         ports.update({number('ANGELWARE_BRO_PORT', 2273, 1, 65535),
                       number('ANGELWARE_BRO_ALT_PORT', 2274, 1, 65535)})
+    # Native transports may have ports outside the SDK discovery/relay ranges.
+    # Keep this explicit so unrelated services on the shared host stay excluded.
+    extra = os.environ.get('ANGELWARE_CAPTURE_EXTRA_UDP_PORTS', '')
+    for item in extra.split(','):
+        if not item.strip():
+            continue
+        value = int(item.strip())
+        if not 1 <= value <= 65535:
+            raise ValueError('invalid ANGELWARE_CAPTURE_EXTRA_UDP_PORTS')
+        ports.add(value)
     lo, hi = map(int, os.environ.get('ANGELWARE_RELAY_PORTS', '20000-20199').split('-'))
     if not 1 <= lo <= hi <= 65535:
         raise ValueError('invalid ANGELWARE_RELAY_PORTS')

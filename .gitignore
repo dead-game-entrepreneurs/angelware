@@ -8,3 +8,7 @@ tools/ghidra_*.sh
 tools/__pycache__/
 ops/capture/__pycache__/
 scripts/__pycache__/
+
+# Local multi-game runtime configuration
+configs/angelware.json
+patches/**/__pycache__/

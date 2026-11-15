@@ -9,5 +9,5 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/angelware ./cmd/an
 FROM scratch
 COPY --from=build /out/angelware /angelware
 USER 65534:65534
-EXPOSE 3074/tcp 3074/udp 3075/udp
+EXPOSE 3074/tcp 3074/udp 3075/udp 3658/udp
 ENTRYPOINT ["/angelware"]

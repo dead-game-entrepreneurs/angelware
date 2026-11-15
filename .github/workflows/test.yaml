@@ -11,6 +11,19 @@ permissions:
 jobs:
   go:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: angelware-test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      ANGELWARE_TEST_DATABASE_URL: postgres://postgres:angelware-test@127.0.0.1/postgres?sslmode=disable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -27,6 +40,13 @@ jobs:
         run: |
           python3 -m unittest discover -s ops/capture -p 'test_*.py' -v
           python3 -m unittest discover -s tools -p 'test_*.py' -v
+      - name: Test compiled OutRun PNACH transport
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm
+          python3 -m venv /tmp/angelware-pnach-venv
+          /tmp/angelware-pnach-venv/bin/pip install unicorn==2.1.4
+          /tmp/angelware-pnach-venv/bin/python patches/outrun2006/test_transport.py
       - name: Build production image
         run: docker build --tag angelware:ci .
       - name: Build capture image

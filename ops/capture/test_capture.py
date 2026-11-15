@@ -87,6 +87,19 @@ class CapturePolicyTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 capture.capture_filter()
 
+    def test_extra_native_ports_are_explicit_and_validated(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertNotIn('port 3658', capture.capture_filter())
+            os.environ['ANGELWARE_CAPTURE_EXTRA_UDP_PORTS'] = '3658, 40000'
+            expression = capture.capture_filter()
+            self.assertIn('port 3658', expression)
+            self.assertIn('port 40000', expression)
+            self.assertNotIn('port 53', expression)
+            for value in ('0', '65536', '-1', '3658 or port 22'):
+                os.environ['ANGELWARE_CAPTURE_EXTRA_UDP_PORTS'] = value
+                with self.assertRaises(ValueError):
+                    capture.capture_filter()
+
 
 if __name__ == '__main__':
     unittest.main()

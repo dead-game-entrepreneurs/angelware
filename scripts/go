@@ -7,4 +7,4 @@ exec docker run --rm -i -u "$(id -u):$(id -g)" \
   -v "$PWD":/src -w /src \
   -v angelware-gocache:/cache -e GOCACHE=/cache/build -e GOMODCACHE=/cache/mod \
   -e GOFLAGS=-buildvcs=false \
-  golang:1.27.4-alpine go "$@"
+  "${ANGELWARE_GO_IMAGE:-golang:1.27.4-alpine}" go "$@"
