@@ -104,9 +104,17 @@ Point these names at the IP address of the machine running angelware (an `A` rec
 | `smackdownvsraw2007.stun.us.demonware.net` | NAT detection, connecting players |
 | `smackdownvsraw2007.stun.eu.demonware.net` | NAT detection (the game asks for both) |
 
-Also redirect the shared SDK discovery names: `stun.us.demonware.net`,
-`stun.eu.demonware.net`, `stun.jp.demonware.net`, `stun.au.demonware.net`.
-Family Feud and WSOP 2008 use these during startup, before title-specific login.
+**Shared SDK discovery — Family Feud and WSOP 2008:**
+
+Both games use these during startup, before title-specific login. Redirect all
+four names along with the game's own names below.
+
+| Hostname | Used for |
+| --- | --- |
+| `stun.us.demonware.net` | SDK discovery (US) |
+| `stun.eu.demonware.net` | SDK discovery (Europe) |
+| `stun.jp.demonware.net` | SDK discovery (Japan) |
+| `stun.au.demonware.net` | SDK discovery (Australia) |
 
 For **OutRun 2006: Coast 2 Coast**:
 
@@ -133,7 +141,7 @@ For **World Series of Poker 2008: Battle for the Bracelets**:
 | `wsop2008-ps2-auth.mmp3.demonware.net` | Sign-up and login |
 | `wsop2008-ps2-lsg.mmp3.demonware.net` | Lobby and matchmaking |
 
-Use the four generic SDK discovery names above as well. See [WSOP setup](#pcsx2-world-series-of-poker-2008) for account and invitation details.
+See [WSOP setup](#pcsx2-world-series-of-poker-2008) for account and invitation details.
 
 For **Call of Duty 2: Big Red One**:
 
