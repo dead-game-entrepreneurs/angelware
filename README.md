@@ -38,6 +38,10 @@ Supported games:
   experimental accounts, matchmaking, friends and leaderboards. Two unmodified PCSX2
   Sockets clients completed games over direct P2P and forced relay. No PNACH required.
   See [protocol notes](docs/games/wsop2008/analysis.md).
+- **Stacked with Daniel Negreanu** (US PS2, `SLUS-212.59`, v1.01): experimental accounts,
+  cash tables, friends, game invitations and statistics. Direct and forced-relay play
+  work in PCSX2 Sockets without patches. Multi-table tournaments are not implemented.
+  See [protocol notes](docs/games/stacked/analysis.md).
 - **Call of Duty 2: Big Red One** (US): NAT detection and connecting players, with an optional relay
   for players whose routers won't connect directly. Its lobby and matchmaking run on GameSpy
   (OpenSpy), not DemonWare, so angelware only replaces the DemonWare STUN part.
@@ -81,7 +85,7 @@ If hardware rendering only shows half the picture, try PCSX2's Software renderer
       │
       ├── DNAS check ──────────▶ community DNAS replacement (not part of angelware)
       ├── TCP 3074  ───────────▶ angelware: sign-up, login, lobby
-      ├── UDP 3074/3075 ───────▶ angelware: NAT detection (WWE, OutRun and Family Feud can share one IP)
+      ├── UDP 3074/3075 ───────▶ angelware: NAT detection (WWE, OutRun, Family Feud, WSOP and Stacked)
       └── UDP 2273/2274 ───────▶ angelware: NAT detection and connecting players (CoD BRO)
                                      └── UDP 20000-20199: DemonWare relay endpoints
                                      │
@@ -143,6 +147,17 @@ For **World Series of Poker 2008: Battle for the Bracelets**:
 
 See [WSOP setup](#pcsx2-world-series-of-poker-2008) for account and invitation details.
 
+For **Stacked with Daniel Negreanu**:
+
+| Hostname | Used for |
+| --- | --- |
+| `auth.stacked.mmp.demonware.net` | Sign-up and login |
+| `lsg.stacked.mmp.demonware.net` | Lobby and matchmaking |
+| `stacked.stun.us.demonware.net` | Discovery before login |
+
+See [Stacked protocol notes](docs/games/stacked/analysis.md) for current limitations
+and listener configuration.
+
 For **Call of Duty 2: Big Red One**:
 
 | Hostname | Used for |
@@ -173,6 +188,9 @@ address=/outrun2.stun.us.demonware.net/203.0.113.10
 address=/outrun2.stun.eu.demonware.net/203.0.113.10
 address=/wsop2008-ps2-auth.mmp3.demonware.net/203.0.113.10
 address=/wsop2008-ps2-lsg.mmp3.demonware.net/203.0.113.10
+address=/auth.stacked.mmp.demonware.net/203.0.113.10
+address=/lsg.stacked.mmp.demonware.net/203.0.113.10
+address=/stacked.stun.us.demonware.net/203.0.113.10
 address=/familyfeud.auth.mmp.demonware.net/203.0.113.10
 address=/familyfeud.lsg.mmp.demonware.net/203.0.113.10
 address=/familyfeud.stun.us.demonware.net/203.0.113.10
@@ -289,19 +307,23 @@ The JSON file selects enabled games. Each entry supplies `game`, `bind`, `public
 `tcp_port`, `stun`, and game-specific `options`. Unknown game names and options fail startup.
 Defaults come from the game's definition. Empty `games` is an error.
 
-WWE and OutRun can share one IPv4 and UDP 3074/3075 with the explicit configuration in
-[`configs/single-ip.example.json`](configs/single-ip.example.json). Set OutRun's
-`stun.share_with` to `svr2007` and give both entries the same `bind` and `public_ip`. The listener
-routes OutRun's padded v1 discovery into its own direct router and WWE's packed v2 into its
-existing router. Their peer state, NAT policy and relay capacity remain separate. OutRun's
-optional native gameplay relay still uses UDP 3658; this does not enable adaptive OutRun gameplay.
+WWE, OutRun, Family Feud, WSOP 2008 and Stacked can share one IPv4 and UDP
+3074/3075 with [`configs/single-ip.example.json`](configs/single-ip.example.json).
+Give every entry the same `bind` and `public_ip`. Family Feud, WSOP and Stacked use
+`"stun": { "share_transport_with": "svr2007" }`; OutRun uses
+`"stun": { "share_with": "svr2007" }` and retains its native peer transport.
+Auth, rooms, friends and lobby handlers remain game-scoped. WWE's peer hook only
+rewrites packets bound to WWE room keys.
 
-Family Feud and WSOP 2008 can join WWE's packed-v2 SDK transport with
-`"stun": { "share_transport_with": "svr2007" }` and matching bind/public addresses.
-This shares discovery, traversal, relay capacity and the owner's routing policy. Auth, rooms and
-lobby handlers remain separate; WWE's peer hook only rewrites packets bound to WWE room keys.
-Family Feud uses temporary guest identities rather than password accounts. Completed games have
-passed on both direct and forced-relay paths. See [protocol notes](docs/games/familyfeud/analysis.md).
+The shared SDK transport accepts both discovery formats and replies in the client's
+format. Stacked and OutRun both send padded v1 discovery, which carries no game or
+DNS name, so enabling both uses the owner's common real-address discovery policy.
+Use **adaptive** mode for the example: SDK games can fall back to the relay, while
+OutRun's optional PNACH gameplay relay stays on UDP 3658. Discovery-only clients
+with an overlapping format share SDK discovery state and relay capacity. Always-relay
+mode is rejected for that overlap because it would advertise virtual SDK addresses
+to OutRun. Without an overlapping SDK member, OutRun keeps its separate direct
+discovery router. This does not enable adaptive OutRun gameplay.
 
 Sharing aliases cannot chain or override the owner's listener settings. Titles requiring different
 SDK routing policies need separate addresses/listeners. Ambiguous binds fail startup.

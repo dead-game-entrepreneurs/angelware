@@ -124,7 +124,7 @@ func observerSession() []bitbuf.Field {
 	return []bitbuf.Field{bitbuf.Bytes(bitbuf.Blob, make([]byte, 25)), bitbuf.Bytes(bitbuf.Blob, make([]byte, 8)), bitbuf.Bytes(bitbuf.Blob, make([]byte, 16)), bitbuf.Int(bitbuf.I32, 2), bitbuf.Int(bitbuf.I32, 0), bitbuf.Int(bitbuf.I32, 0), bitbuf.Int(bitbuf.I32, 0)}
 }
 func inspectTestRoom(info []bitbuf.Field) (netip.AddrPort, int, bool) {
-	if !validBase(info) {
+	if !validBase(info, 25) {
 		return netip.AddrPort{}, 0, false
 	}
 	a := info[0].Bytes[18:24]

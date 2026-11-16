@@ -167,11 +167,14 @@ func Build(c Config, definitions []game.Definition, db store.Database, log *slog
 		}
 		owner := owners[key]
 		d := registry[key]
-		if owner == nil || d.DiscoveryOnly || owner.DiscoveryVersion != g.definition.DiscoveryVersion {
-			return nil, fmt.Errorf("%s: transport owner %q must have its own SDK listener with the same wire version", g.definition.Key, key)
+		if owner == nil || d.DiscoveryOnly || d.STUNPort != g.definition.STUNPort || d.AltPort != g.definition.AltPort {
+			return nil, fmt.Errorf("%s: transport owner %q must have its own SDK listener with the same discovery ports", g.definition.Key, key)
 		}
 		if owner.Bind != g.bind.String() || owner.PublicIP != g.public {
 			return nil, fmt.Errorf("%s: shared transport must use the owner's bind and public_ip", g.definition.Key)
+		}
+		if err := owner.AddTransport(g.definition.DiscoveryVersion); err != nil {
+			return nil, fmt.Errorf("%s: %w", g.definition.Key, err)
 		}
 		g.connectivity = owner
 		owner.Games = append(owner.Games, g.definition.Key)

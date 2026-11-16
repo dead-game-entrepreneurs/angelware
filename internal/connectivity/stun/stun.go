@@ -29,17 +29,18 @@ type Server struct {
 	Bind  string
 	Log   *slog.Logger
 	Games []string // configured SDK titles sharing this transport, not inferred from DNS
-	// DiscoveryVersion identifies the owning game's IP/NAT wire format when
-	// sharing is enabled. Unshared listeners keep their legacy version support.
+	// DiscoveryVersion identifies the owning game's IP/NAT wire format.
+	// SDK members may add other discovery versions to this same transport.
 	DiscoveryVersion uint16
 
-	mu        sync.Mutex
-	router    *Router
-	profiles  map[uint16]*slog.Logger
-	discovery map[uint16]*Router
-	ports     [2]*net.UDPConn
-	relays    map[int]*net.UDPConn
-	rewriters map[string]PeerRewriter
+	mu         sync.Mutex
+	router     *Router
+	profiles   map[uint16]*slog.Logger
+	transports map[uint16]bool
+	discovery  map[uint16]*Router
+	ports      [2]*net.UDPConn
+	relays     map[int]*net.UDPConn
+	rewriters  map[string]PeerRewriter
 }
 
 // Run serves until ctx ends.

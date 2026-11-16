@@ -22,9 +22,19 @@ are a different transport. The PSP build `ULUS-10064` is a separate target and i
 
 Generic `stun.{eu,us,jp,au}.demonware.net` names also occur in the SDK. Both games can use one
 reachable IPv4 by setting OutRun's `stun.share_with` to `svr2007`: padded v1 discovery and
-its peer state are isolated from WWE's packed v2 router on the shared UDP 3074/3075 sockets.
+its peer state are isolated from WWE's packed v2 router on the shared UDP 3074/3075 sockets
+when no padded-v1 SDK member is enabled. With Stacked also sharing these sockets,
+the identical v1 discovery packets use the common SDK real-address policy and
+capacity; select adaptive or direct mode. OutRun's native UDP 3658 transport
+remains separate. See the single-IP example.
 A separate bind address remains supported. The disc includes `DNAS310.IMG`; AngelWare
 does not replace DNAS.
+
+The combined-listener regression with Stacked enabled verified both OutRun
+account logins, both native relay registrations, room creation, discovery by the
+second player and a join into gameplay. Two-way native relay traffic on UDP 3658
+continued under the common adaptive discovery policy, without server warnings or
+errors. Stacked had already completed a game on this same running configuration.
 
 ## Protocol layouts
 

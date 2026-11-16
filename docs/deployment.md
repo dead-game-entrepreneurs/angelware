@@ -3,12 +3,13 @@
 Build and test the release before interrupting the running service. The legacy environment
 configuration still starts WWE and CoD BRO. Enabling OutRun requires the structured game
 configuration; see [network configuration](architecture.md#network-configuration) and the
-[OutRun patch setup](../patches/outrun2006/README.md). Family Feud also requires structured
-configuration. WSOP 2008 uses structured configuration as well. The
-[single-IP example](../configs/single-ip.example.json) shares both games' SDK transport
-with WWE. Redirect Family Feud's four title-specific names, WSOP's two MMP3 names,
-and the four generic SDK discovery names listed in the README. WSOP adds no new
-listening ports or database migrations.
+[OutRun patch setup](../patches/outrun2006/README.md). Family Feud, WSOP 2008 and Stacked
+also use structured configuration. The
+[single-IP example](../configs/single-ip.example.json) shares their SDK transport
+with WWE and OutRun's native discovery. Keep its common listener in adaptive mode
+when both Stacked and OutRun are enabled. Redirect each game's title-specific names
+and the four generic SDK discovery names listed in the README. Stacked adds no
+listening ports or database migration; its native gameplay uses peer UDP 4070.
 
 ## Upgrade an existing installation
 
@@ -49,6 +50,7 @@ backup first if the new server accepted gameplay.
 ## Diagnostics
 
 For structured configuration, set `log_level` in the game JSON to `debug` for a hosted beta.
-Set `ANGELWARE_CAPTURE_EXTRA_UDP_PORTS=3658` when OutRun's native relay is enabled. The
+Set `ANGELWARE_CAPTURE_EXTRA_UDP_PORTS=3658,4070` when OutRun's native relay and
+Stacked are enabled (use only the needed ports for a smaller configuration). The
 [diagnostics runbook](beta-diagnostics.md) describes retention and private incident bundles.
 Raw captures, `.env` files, database dumps and recovered ticket/key material stay private.
