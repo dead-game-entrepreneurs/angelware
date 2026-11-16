@@ -18,6 +18,7 @@
 
 <p align="center">
   <a href="#dns-redirects">DNS redirects</a> ·
+  <a href="#pcsx2-outrun-2006">PCSX2 / OutRun</a> ·
   <a href="#running-the-server">Running the server</a> ·
   <a href="docs/games/svr2007/analysis.md">Protocol notes</a>
 </p>
@@ -29,14 +30,8 @@
 Supported games:
 
 - **WWE SmackDown vs. Raw 2007** (US, `SLUS-214.27`, v1.01): the full online service.
-- **OutRun 2006: Coast 2 Coast** (US PS2, `SLUS-212.74`): experimental auth, lobby,
-  matchmaking, statistics and ghost storage. Two unmodified PCSX2 clients have found a room,
-  joined and completed a race over native UDP 3658; both players' result writes were saved.
-  The retail ranking screen has read both saved rows back. An experimental
-  [PNACH and native relay](patches/outrun2006/README.md) adds automatic hosting in Sockets.
-  Two stock Flatpak clients have hosted, joined, completed a relay race and saved both results.
-  Synchronization quality, broader network coverage and ghost transfers need further testing.
-  See [OutRun setup and protocol notes](docs/games/outrun2006/analysis.md).
+- **OutRun 2006: Coast 2 Coast** (US PS2, `SLUS-212.74`): experimental online service,
+  with an optional PNACH relay for PCSX2 Sockets. See [PCSX2 connection options](#pcsx2-outrun-2006).
 - **Call of Duty 2: Big Red One** (US): NAT detection and connecting players, with an optional relay
   for players whose routers won't connect directly. Its lobby and matchmaking run on GameSpy
   (OpenSpy), not DemonWare, so angelware only replaces the DemonWare STUN part.
@@ -69,7 +64,7 @@ match. Protocol notes are in [docs/games/svr2007/analysis.md](docs/games/svr2007
       │
       ├── DNAS check ──────────▶ community DNAS replacement (not part of angelware)
       ├── TCP 3074  ───────────▶ angelware: sign-up, login, lobby
-      ├── UDP 3074/3075 ───────▶ angelware: NAT detection (WWE and OutRun, separate server IPs)
+      ├── UDP 3074/3075 ───────▶ angelware: NAT detection (WWE and OutRun can share one IP)
       └── UDP 2273/2274 ───────▶ angelware: NAT detection and connecting players (CoD BRO)
                                      └── UDP 20000-20199: relay endpoints for CoD BRO peers
                                      │
@@ -95,6 +90,15 @@ Point these names at the IP address of the machine running angelware (an `A` rec
 Optional, only used as fallbacks by the DemonWare library: `stun.us.demonware.net`,
 `stun.eu.demonware.net`, `stun.jp.demonware.net`, `stun.au.demonware.net`.
 
+For **OutRun 2006: Coast 2 Coast**:
+
+| Hostname | Used for |
+| --- | --- |
+| `auth.outrun2.mmp.demonware.net` | Sign-up and login |
+| `lsg.outrun2.mmp.demonware.net` | Lobby and matchmaking |
+| `outrun2.stun.us.demonware.net` | IP and NAT discovery |
+| `outrun2.stun.eu.demonware.net` | IP and NAT discovery |
+
 For **Call of Duty 2: Big Red One**:
 
 | Hostname | Used for |
@@ -119,6 +123,10 @@ address=/smackdownvsraw2007.us.ps2.auth.mmp.demonware.net/203.0.113.10
 address=/smackdownvsraw2007.us.ps2.lsg.mmp.demonware.net/203.0.113.10
 address=/smackdownvsraw2007.stun.us.demonware.net/203.0.113.10
 address=/smackdownvsraw2007.stun.eu.demonware.net/203.0.113.10
+address=/auth.outrun2.mmp.demonware.net/203.0.113.10
+address=/lsg.outrun2.mmp.demonware.net/203.0.113.10
+address=/outrun2.stun.us.demonware.net/203.0.113.10
+address=/outrun2.stun.eu.demonware.net/203.0.113.10
 address=/bro.stun.activision.com/203.0.113.10
 server=/dnas.playstation.org/45.7.228.197
 ```
@@ -127,6 +135,51 @@ server=/dnas.playstation.org/45.7.228.197
 
 Then set the DNS server in the game's network configuration (or in PCSX2's network settings) to your
 resolver.
+
+## PCSX2: OutRun 2006
+
+Configure the game's network profile to use your AngelWare DNS resolver, then choose one of
+these connection options. The PNACH below targets **US `SLUS-21274`, CRC `38C16493`**.
+
+### Sockets with the PNACH relay (recommended)
+
+This supports automatic hosting through AngelWare, including PCSX2 Flatpak.
+
+1. In **Settings → Network & HDD**, enable Ethernet, select **Sockets**, and choose your adapter.
+2. Copy [SLUS-21274_38C16493.pnach](patches/outrun2006/SLUS-21274_38C16493.pnach) into PCSX2's
+   **patches** folder. Find the active folder under **Settings → Folders**. Flatpak normally uses
+   `~/.var/app/net.pcsx2.PCSX2/config/PCSX2/patches/`.
+3. Open **OutRun → Properties → Patches**, click **Reload**, and enable **AngelWare native relay**.
+4. Fully stop and boot the game, then log in and create or join a room. Use a fresh boot when
+   enabling or updating the patch, rather than loading an old save state.
+
+**Both players need the PNACH for a relayed session.** The server must enable OutRun's
+`options.native_relay` and allow UDP **3658**. See the [relay setup](patches/outrun2006/README.md)
+for server configuration. The disc image and emulator binary stay unchanged.
+
+### PCAP (direct connection)
+
+Use **PCAP Bridged** with your network adapter and configure a valid LAN address, gateway,
+and AngelWare DNS in the game's network profile. Disable the relay PNACH for direct play.
+The emulated consoles need direct UDP **3658** connectivity, including any necessary firewall
+or router forwarding.
+
+Linux PCAP requires raw-packet permissions (`CAP_NET_RAW` and `CAP_NET_ADMIN`). Flatpak's
+sandbox does not support this path; use Sockets there. A “no network cable” error can mean
+PCSX2 could not open the adapter. See the [PCSX2 PCAP backend notes](https://github.com/PCSX2/pcsx2/blob/master/pcsx2/DEV9/pcap_io.cpp).
+
+### Sockets without the patch: host / back-out workaround
+
+With the relay PNACH disabled on both clients, this sequence can prime the direct UDP sockets:
+
+1. **Player B** creates a temporary room.
+2. **Player A** tries **Quick Game** once, then backs out and immediately creates the actual room.
+   Continue even if the search reports no sessions.
+3. **Player B** leaves the temporary room and uses **Quick Game** to join Player A.
+
+Complete the switch within about **two minutes**, before the socket mappings expire. This
+still needs working direct connectivity and may need repeating after an emulator restart or
+an idle timeout. Use the PNACH relay when direct connections cannot get through the network.
 
 ## Running the server
 
@@ -148,7 +201,7 @@ docker compose logs -f angelware
 ```
 
 Open these in your firewall: **TCP 3074**, **UDP 3074-3075**, and for CoD BRO **UDP 2273-2274** and
-the relay range **UDP 20000-20199**.
+the relay range **UDP 20000-20199**. Enable **UDP 3658** for OutRun's optional native relay.
 
 angelware runs with host networking so it sees each player's real address, which NAT detection needs.
 PostgreSQL is only reachable from the machine itself. Stop with `docker compose down`; add `-v` only if

@@ -7,12 +7,8 @@ uses the original direct native transport; it does not load PCSX2 PNACH files or
 relay protocol. Adaptive routing for OutRun has not been implemented.
 
 Supported disc: **SLUS-21274, CRC 38C16493**. Other regions/revisions need separate verified hooks.
-The compiled shim and server protocol tests pass. Stock Flatpak PCSX2 has registered,
-received keepalive replies and created a room directly with the virtual relay address.
-A second stock Flatpak client has discovered and joined that room, and both clients
-completed a relay race and saved their results. The desktop reported zero shim drops/read
-errors. The tester noted a possible synchronization issue but deferred characterizing it;
-play quality still needs broader tester feedback.
+For PCAP and the unpatched Sockets workaround, see the
+[PCSX2 / OutRun connection options](../../README.md#pcsx2-outrun-2006).
 
 ## Setup
 
@@ -31,19 +27,6 @@ play quality still needs broader tester feedback.
 
 Restart PCSX2 or use the Patches page's Reload button if the entry is not visible after
 copying the file. A file placed in `patches` is listed on the Patches page.
-
-Revision 3 expands the game's per-thread socket staging capacity and matching allocation
-from 2048 to 4096 bytes. The relay envelope plus a full native packet can then be sent
-and received without exceeding the game API's request-size limit. Both allocation literals
-are verified against the supported ELF. Revision 2 registered successfully at the server
-but could not read ACKs because even a 32-byte ACK was rejected when the receive request
-asked for 2081 bytes from a 2048-byte staging buffer.
-
-Revision 2 introduced the central network pump (`0x21dd18`) to register and consume the
-relay ACK while the player is still in the online menus. Revision 1 waited on a native
-worker that is not yet scheduled before hosting, causing create-session timeout. Replace
-any older revision on both PCs and fully stop/boot; reloading a changed code shim into a running
-game is not a supported update path.
 
 ## Live test
 
