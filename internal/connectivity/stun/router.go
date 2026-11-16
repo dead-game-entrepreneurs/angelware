@@ -23,7 +23,13 @@ const (
 	Adaptive Mode = "adaptive"
 )
 
-// Config describes one title's STUN service on a single public IPv4 address.
+// PeerRewriter transforms only packets bound to its game's room/key. Unknown
+// associations must be returned unchanged so a common SDK transport can host
+// several independent title hooks.
+type PeerRewriter func(sender, destination int, senderControl, senderVirtual,
+	destinationControl, destinationVirtual netip.AddrPort, packet []byte, now time.Time) []byte
+
+// Config describes one SDK transport on a single public IPv4 address.
 type Config struct {
 	PublicIP        netip.Addr
 	Port, AltPort   int
@@ -34,8 +40,7 @@ type Config struct {
 	DirectWindow    time.Duration // adaptive only
 	// RewritePeer is an optional title-specific transform on admitted relay
 	// traffic. Direct traffic and titles that leave it nil remain opaque.
-	RewritePeer func(sender, destination int, senderControl, senderVirtual,
-		destinationControl, destinationVirtual netip.AddrPort, packet []byte, now time.Time) []byte
+	RewritePeer PeerRewriter
 }
 
 const (

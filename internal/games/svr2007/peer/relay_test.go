@@ -183,6 +183,16 @@ func TestSyntheticRelayRewrite(t *testing.T) {
 				return packet
 			}
 			packet, want := seal(join(host)), seal(join(virtual))
+			// A common SDK listener may see another title's identical transport.
+			// Even a recoverable PRNG/valid MAC must not authorize that title's
+			// room for WWE's address transform.
+			foreign := New(log, func([8]byte) ([]byte, bool) { return nil, false })
+			foreign.recordSeed(host.Addr(), seed, now)
+			foreign.Rewrite(2, 1, guest, guestVirtual, host, virtual, handshake(3, remote, 169), now)
+			foreign.Rewrite(1, 2, host, virtual, guest, guestVirtual, handshake(4, private, 106), now)
+			if got := foreign.Rewrite(1, 2, host, virtual, guest, guestVirtual, packet, now); !bytes.Equal(got, packet) {
+				t.Fatal("packet outside the game's room scope was rewritten")
+			}
 			before := bytes.Clone(packet)
 			got := e.Rewrite(1, 2, host, virtual, guest, guestVirtual, packet, now)
 			if !bytes.Equal(got, want) || bytes.Equal(got, packet) {

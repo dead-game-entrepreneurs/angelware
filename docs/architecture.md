@@ -2,7 +2,8 @@
 
 AngelWare composes one runtime per enabled game. Credentials are shared across the service. DemonWare transport and
 reusable services are shared code; each runtime has its own handlers, gameplay storage scope, rooms, online players, and
-connectivity state. The executable registers factories explicitly in `cmd/angelware/main.go`.
+connectivity policy. Compatible titles can explicitly share SDK transport state. The executable
+registers factories explicitly in `cmd/angelware/main.go`.
 
 ## Package boundaries
 
@@ -25,7 +26,8 @@ no STUN port may compose TCP services alone.
 Matchmaking owns room IDs, keys, connection ownership, lifecycle and disclosure tracking.
 Game policies interpret session fields and search criteria. Optional connectivity inspection
 and completion callbacks keep WWE's two-player observer rules in its own package. WWE's peer
-rewriter also lives there; enabling another game never attaches that rewriter to its traffic.
+rewriter also lives there. On a shared SDK transport it checks its own room/key binding before
+changing traffic; another title's associations remain opaque.
 
 Stats services own reads, writes, paging and deletion. Game codecs decode writes and encode rows,
 including wire integer types, extra columns and board ordering. Storage preserves integer
@@ -42,6 +44,11 @@ Auth selects a registered title before touching its store. Login tickets bind th
 actual wire title ID to a random server-side session token. A gateway redeems that token and
 opens the corresponding game application; it does not accept a game identity from lobby tasks.
 A ticket for a game unavailable on that listener is rejected.
+
+Anonymous SDK request `0x10` is enabled only by titles that opt into guest login. It issues a
+fresh random temporary identity and a game-scoped lobby ticket, without writing an account.
+The session records its guest status; neither source IP nor request seed identifies an account.
+Password titles reject this request. Family Feud registers only matchmaking for these guests.
 
 `Database.ForGame(key)` combines the shared `Accounts` interface with permanently scoped gameplay
 storage. A username has one user ID and password across supported games. Gameplay SQL filters,
@@ -72,8 +79,18 @@ The shared listener creates a separate direct discovery router with no SDK relay
 peer-rewrite callback. IP/NAT packets select it by wire version; later packed-v2 traversal
 follows the endpoint learned during discovery. A new explicit discovery updates ownership.
 Peers and rate limits remain scoped to each router, so OutRun clients do not consume WWE's
-relay capacity or inherit its adaptive NAT policy. Games with indistinguishable discovery
-formats still need separate addresses/listeners. DNS is not a UDP routing key.
+relay capacity or inherit its adaptive NAT policy. DNS is not a UDP routing key.
+
+Compatible SDK titles with the same discovery version may instead set
+`stun.share_transport_with`. They inherit one owner's complete SDK router, relay capacity and
+adaptive policy. Bind/public addresses and wire versions must match; native-transport titles,
+setting overrides, cycles and alias chains are rejected. Generic UDP discovery cannot identify
+the game. Application room lookup and lobby tickets remain game-scoped, and encrypted peer
+protocols authenticate their own sessions. Game-owned rewrite hooks must verify their own
+room/key bindings before modifying anything; their registry is frozen before serving packets.
+WWE's direct-completion observer retains its authenticated room-generation checks and declines
+ambiguous endpoint matches. Shared UDP logs identify the transport rather than guessing a title.
+Independent per-title NAT/relay policies still require separate listeners.
 A runtime may also provide `game.PacketService` instances for its native peer transport; the
 application validates their UDP binds, starts them, and cancels/joins them with the other services.
 Startup rejects overlapping discovery/native sockets and conflicting TCP wildcard binds. Relay ranges

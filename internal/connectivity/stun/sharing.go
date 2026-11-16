@@ -4,8 +4,56 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"sort"
 	"time"
 )
+
+// RegisterPeerRewriter installs a game-owned hook before Run. Each hook must
+// verify its own room/key binding; sharing a socket never shares room lookup.
+func (s *Server) RegisterPeerRewriter(game string, rewrite PeerRewriter) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.router != nil || game == "" || rewrite == nil {
+		return fmt.Errorf("peer rewriter requires a game and must be registered before Run")
+	}
+	if s.rewriters == nil {
+		s.rewriters = map[string]PeerRewriter{}
+	}
+	if s.rewriters[game] != nil {
+		return fmt.Errorf("duplicate peer rewriter for %s", game)
+	}
+	s.rewriters[game] = rewrite
+	return nil
+}
+
+// Called with s.mu held. Snapshot the hooks so packet forwarding never consults
+// mutable startup configuration, and config ordering cannot change hook order.
+func (s *Server) peerRewriter() PeerRewriter {
+	var hooks []PeerRewriter
+	if s.Config.RewritePeer != nil {
+		hooks = append(hooks, s.Config.RewritePeer)
+	}
+	var games []string
+	for game := range s.rewriters {
+		games = append(games, game)
+	}
+	sort.Strings(games)
+	for _, game := range games {
+		hooks = append(hooks, s.rewriters[game])
+	}
+	if len(hooks) == 0 {
+		return nil
+	}
+	return func(sender, destination int, senderControl, senderVirtual, destinationControl, destinationVirtual netip.AddrPort, packet []byte, now time.Time) []byte {
+		for _, hook := range hooks {
+			packet = hook(sender, destination, senderControl, senderVirtual, destinationControl, destinationVirtual, packet, now)
+			if packet == nil {
+				return nil
+			}
+		}
+		return packet
+	}
+}
 
 // AddDiscovery attaches a discovery-only game to these sockets before Run.
 // Its direct router has its own admission/peer state and no SDK relay allocator.

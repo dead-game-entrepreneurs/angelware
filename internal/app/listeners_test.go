@@ -12,6 +12,7 @@ import (
 
 	"github.com/princebyyourlogic/angelware/internal/connectivity/stun"
 	"github.com/princebyyourlogic/angelware/internal/game"
+	"github.com/princebyyourlogic/angelware/internal/games/familyfeud"
 	"github.com/princebyyourlogic/angelware/internal/games/outrun2006"
 	"github.com/princebyyourlogic/angelware/internal/games/svr2007"
 	"github.com/princebyyourlogic/angelware/internal/storage"
@@ -115,6 +116,7 @@ func TestSharedDiscoveryUsesSameUDPListenersWithDifferentPolicies(t *testing.T) 
 		alternate = availablePort(t)
 	}
 	app, err := buildForTest(Config{Games: []GameConfig{
+		{Game: familyfeud.Key, Bind: "127.0.0.1", PublicIP: "127.0.0.1", TCPPort: tcpPort, STUN: Connectivity{ShareTransportWith: svr2007.Key}},
 		{Game: outrun2006.Key, Bind: "127.0.0.1", PublicIP: "127.0.0.1", TCPPort: tcpPort, STUN: Connectivity{ShareWith: svr2007.Key}},
 		{Game: svr2007.Key, Bind: "127.0.0.1", PublicIP: "127.0.0.1", TCPPort: tcpPort, STUN: Connectivity{Port: primary, AltPort: alternate, Mode: stun.Adaptive}},
 	}})

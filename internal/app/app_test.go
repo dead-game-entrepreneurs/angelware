@@ -9,13 +9,66 @@ import (
 	"github.com/princebyyourlogic/angelware/internal/connectivity/stun"
 	"github.com/princebyyourlogic/angelware/internal/game"
 	"github.com/princebyyourlogic/angelware/internal/games/codbro"
+	"github.com/princebyyourlogic/angelware/internal/games/familyfeud"
 	"github.com/princebyyourlogic/angelware/internal/games/outrun2006"
 	"github.com/princebyyourlogic/angelware/internal/games/svr2007"
 	"github.com/princebyyourlogic/angelware/internal/storage"
 )
 
 func definitions() []game.Definition {
-	return []game.Definition{svr2007.Definition(), outrun2006.Definition(), codbro.Definition()}
+	return []game.Definition{svr2007.Definition(), outrun2006.Definition(), codbro.Definition(), familyfeud.Definition()}
+}
+
+func TestCommonSDKTransportAndDiscoveryOnlyChild(t *testing.T) {
+	config := Config{Games: []GameConfig{
+		{Game: familyfeud.Key, Bind: "127.0.0.1", PublicIP: "127.0.0.1", STUN: Connectivity{ShareTransportWith: svr2007.Key}},
+		{Game: outrun2006.Key, Bind: "127.0.0.1", PublicIP: "127.0.0.1", STUN: Connectivity{ShareWith: svr2007.Key}},
+		{Game: svr2007.Key, Bind: "127.0.0.1", PublicIP: "127.0.0.1", STUN: Connectivity{Mode: stun.Adaptive}, Options: []byte(`{"relay_rewrite":true,"observer":true}`)},
+	}}
+	app, err := buildForTest(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(app.UDP) != 1 || len(app.TCP) != 1 || len(app.TCP["127.0.0.1:3074"].Auth) != 3 {
+		t.Fatal("same-version SDK sharing created duplicate listeners or lost title routing")
+	}
+	if app.UDP[0].Mode != stun.Adaptive || len(app.UDP[0].Games) != 2 {
+		t.Fatal("SDK transport did not retain its policy/members")
+	}
+	// The socket owner need not be the title that installs a peer hook. Resolve
+	// aliases before factories run, including when the hook belongs to a child.
+	reversed := config
+	reversed.Games = append([]GameConfig(nil), config.Games...)
+	reversed.Games[0].STUN = Connectivity{Mode: stun.Adaptive}
+	reversed.Games[1].STUN = Connectivity{ShareWith: familyfeud.Key}
+	reversed.Games[2].STUN = Connectivity{ShareTransportWith: familyfeud.Key}
+	if app, err := buildForTest(reversed); err != nil || len(app.UDP) != 1 || app.UDP[0].Games[0] != familyfeud.Key {
+		t.Fatalf("SDK owner reversal failed: %v", err)
+	}
+	for name, edit := range map[string]func(*Config){
+		"missing owner": func(c *Config) { c.Games = c.Games[:1] },
+		"self":          func(c *Config) { c.Games[0].STUN.ShareTransportWith = familyfeud.Key },
+		"cycle":         func(c *Config) { c.Games[2].STUN = Connectivity{ShareTransportWith: familyfeud.Key} },
+		"version mismatch": func(c *Config) {
+			c.Games = append(c.Games, GameConfig{Game: "codbro", Bind: "127.0.0.1", PublicIP: "127.0.0.1"})
+			c.Games[0].STUN.ShareTransportWith = "codbro"
+		},
+		"native owner":      func(c *Config) { c.Games[0].STUN.ShareTransportWith = outrun2006.Key },
+		"native child":      func(c *Config) { c.Games[1].STUN = Connectivity{ShareTransportWith: svr2007.Key} },
+		"override":          func(c *Config) { c.Games[0].STUN.Mode = stun.Relay },
+		"different bind":    func(c *Config) { c.Games[0].Bind = "127.0.0.2" },
+		"different public":  func(c *Config) { c.Games[0].PublicIP = "127.0.0.2" },
+		"two sharing modes": func(c *Config) { c.Games[0].STUN.ShareWith = svr2007.Key },
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := config
+			c.Games = append([]GameConfig(nil), config.Games...)
+			edit(&c)
+			if _, err := buildForTest(c); err == nil {
+				t.Fatal("ambiguous SDK sharing accepted")
+			}
+		})
+	}
 }
 func buildForTest(c Config) (*App, error) {
 	return Build(c, definitions(), store.NewMemoryDB(), slog.New(slog.NewTextHandler(io.Discard, nil)))

@@ -32,6 +32,8 @@ Supported games:
 - **WWE SmackDown vs. Raw 2007** (US, `SLUS-214.27`, v1.01): the full online service.
 - **OutRun 2006: Coast 2 Coast** (US PS2, `SLUS-212.74`): experimental online service,
   with an optional PNACH relay for PCSX2 Sockets. See [PCSX2 connection options](#pcsx2-outrun-2006).
+- **Family Feud** (US PS2, `SLUS-214.46`, v1.02): guest login, matchmaking and two-player
+  online games over direct P2P or the DemonWare relay. No PNACH required.
 - **Call of Duty 2: Big Red One** (US): NAT detection and connecting players, with an optional relay
   for players whose routers won't connect directly. Its lobby and matchmaking run on GameSpy
   (OpenSpy), not DemonWare, so angelware only replaces the DemonWare STUN part.
@@ -57,6 +59,17 @@ Supported games:
 The retail game has been tested in PCSX2: two players signed up, found each other's session and played a
 match. Protocol notes are in [docs/games/svr2007/analysis.md](docs/games/svr2007/analysis.md).
 
+### Family Feud
+
+Online play connects two players, each controlling a family. The game signs in automatically
+with a temporary guest identity; it does not use a username or password. Hosting, searching,
+joining and completed games work in PCSX2 Sockets mode over direct P2P and the SDK relay.
+No game or emulator patches are needed. Broader network coverage and physical-console testing
+remain open. See [protocol notes](docs/games/familyfeud/analysis.md).
+
+Set the game's DNS to your AngelWare resolver, including the generic SDK names listed below.
+If hardware rendering only shows half the picture, try PCSX2's Software renderer for this game.
+
 ## How it fits together
 
 ```
@@ -64,9 +77,9 @@ match. Protocol notes are in [docs/games/svr2007/analysis.md](docs/games/svr2007
       │
       ├── DNAS check ──────────▶ community DNAS replacement (not part of angelware)
       ├── TCP 3074  ───────────▶ angelware: sign-up, login, lobby
-      ├── UDP 3074/3075 ───────▶ angelware: NAT detection (WWE and OutRun can share one IP)
+      ├── UDP 3074/3075 ───────▶ angelware: NAT detection (WWE, OutRun and Family Feud can share one IP)
       └── UDP 2273/2274 ───────▶ angelware: NAT detection and connecting players (CoD BRO)
-                                     └── UDP 20000-20199: relay endpoints for CoD BRO peers
+                                     └── UDP 20000-20199: DemonWare relay endpoints
                                      │
                                  PostgreSQL: accounts, profiles, stats
 ```
@@ -87,8 +100,9 @@ Point these names at the IP address of the machine running angelware (an `A` rec
 | `smackdownvsraw2007.stun.us.demonware.net` | NAT detection, connecting players |
 | `smackdownvsraw2007.stun.eu.demonware.net` | NAT detection (the game asks for both) |
 
-Optional, only used as fallbacks by the DemonWare library: `stun.us.demonware.net`,
+Also redirect the shared SDK discovery names: `stun.us.demonware.net`,
 `stun.eu.demonware.net`, `stun.jp.demonware.net`, `stun.au.demonware.net`.
+Family Feud uses these during startup, before contacting its title-specific login service.
 
 For **OutRun 2006: Coast 2 Coast**:
 
@@ -98,6 +112,15 @@ For **OutRun 2006: Coast 2 Coast**:
 | `lsg.outrun2.mmp.demonware.net` | Lobby and matchmaking |
 | `outrun2.stun.us.demonware.net` | IP and NAT discovery |
 | `outrun2.stun.eu.demonware.net` | IP and NAT discovery |
+
+For **Family Feud**:
+
+| Hostname | Used for |
+| --- | --- |
+| `familyfeud.auth.mmp.demonware.net` | Guest login |
+| `familyfeud.lsg.mmp.demonware.net` | Lobby and matchmaking |
+| `familyfeud.stun.us.demonware.net` | IP/NAT discovery and peer introductions |
+| `familyfeud.stun.eu.demonware.net` | IP/NAT discovery and peer introductions |
 
 For **Call of Duty 2: Big Red One**:
 
@@ -127,6 +150,14 @@ address=/auth.outrun2.mmp.demonware.net/203.0.113.10
 address=/lsg.outrun2.mmp.demonware.net/203.0.113.10
 address=/outrun2.stun.us.demonware.net/203.0.113.10
 address=/outrun2.stun.eu.demonware.net/203.0.113.10
+address=/familyfeud.auth.mmp.demonware.net/203.0.113.10
+address=/familyfeud.lsg.mmp.demonware.net/203.0.113.10
+address=/familyfeud.stun.us.demonware.net/203.0.113.10
+address=/familyfeud.stun.eu.demonware.net/203.0.113.10
+address=/stun.us.demonware.net/203.0.113.10
+address=/stun.eu.demonware.net/203.0.113.10
+address=/stun.jp.demonware.net/203.0.113.10
+address=/stun.au.demonware.net/203.0.113.10
 address=/bro.stun.activision.com/203.0.113.10
 server=/dnas.playstation.org/45.7.228.197
 ```
@@ -227,12 +258,19 @@ routes OutRun's padded v1 discovery into its own direct router and WWE's packed 
 existing router. Their peer state, NAT policy and relay capacity remain separate. OutRun's
 optional native gameplay relay still uses UDP 3658; this does not enable adaptive OutRun gameplay.
 
-Games with the same discovery version, or which need separate SDK peer-relay policies, still
-need separate addresses/listeners. Sharing is opt-in and validated; ambiguous binds fail startup.
+Family Feud can join WWE's packed-v2 SDK transport with
+`"stun": { "share_transport_with": "svr2007" }` and matching bind/public addresses.
+This shares discovery, traversal, relay capacity and the owner's routing policy. Auth, rooms and
+lobby handlers remain separate; WWE's peer hook only rewrites packets bound to WWE room keys.
+Family Feud uses temporary guest identities rather than password accounts. Completed games have
+passed on both direct and forced-relay paths. See [protocol notes](docs/games/familyfeud/analysis.md).
+
+Sharing aliases cannot chain or override the owner's listener settings. Titles requiring different
+SDK routing policies need separate addresses/listeners. Ambiguous binds fail startup.
 TCP auth/lobby routes by title ID and ticket. CoD BRO uses UDP 2273/2274 on the same IP.
 Behind NAT, forward the selected ports to the configured server bind address.
 
-Account names and passwords are shared across games. Rooms, profiles, friends, mailbox, statistics,
+Games that use account names and passwords share those credentials. Rooms, profiles, friends, mailbox, statistics,
 and uploaded files remain separate. Existing gameplay records migrate into `svr2007`; existing
 credentials become unified accounts. Numbered migrations run transactionally under
 a database lock. Take a database backup before upgrading an existing installation; older binaries

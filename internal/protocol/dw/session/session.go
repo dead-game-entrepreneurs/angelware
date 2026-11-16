@@ -5,6 +5,7 @@ package session
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -24,6 +25,7 @@ type Session struct {
 	UserID  uint64
 	Name    string
 	Key     []byte
+	Guest   bool // temporary identity, never a password account
 	expires time.Time
 }
 
@@ -36,9 +38,24 @@ func NewRegistry() *Registry { return &Registry{sessions: map[[16]byte]Session{}
 
 // Issue creates a session and returns its opaque lobby ticket.
 func (r *Registry) Issue(game string, title uint32, userID uint64, name string) (Session, []byte) {
+	return r.issue(game, title, userID, name, false)
+}
+
+// IssueGuest creates a fresh identity for an anonymous title login. Neither the
+// request seed nor the client's IP is a persistent account identifier.
+func (r *Registry) IssueGuest(game string, title uint32) (Session, []byte) {
+	var id [8]byte
+	for binary.LittleEndian.Uint64(id[:]) == 0 {
+		rand.Read(id[:])
+	}
+	user := binary.LittleEndian.Uint64(id[:])
+	return r.issue(game, title, user, fmt.Sprintf("Guest%08x", uint32(user)), true)
+}
+
+func (r *Registry) issue(game string, title uint32, userID uint64, name string, guest bool) (Session, []byte) {
 	var token [16]byte
 	rand.Read(token[:])
-	s := Session{Token: token, Game: game, TitleID: title, UserID: userID, Name: name, Key: make([]byte, KeySize), expires: time.Now().Add(ttl)}
+	s := Session{Token: token, Game: game, TitleID: title, UserID: userID, Name: name, Key: make([]byte, KeySize), Guest: guest, expires: time.Now().Add(ttl)}
 	rand.Read(s.Key)
 
 	ticket := make([]byte, TicketSize)

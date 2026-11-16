@@ -25,13 +25,16 @@ type GameConfig struct {
 	Options  json.RawMessage `json:"options,omitempty"`
 }
 type Connectivity struct {
-	ShareWith    string    `json:"share_with,omitempty"`
-	Port         int       `json:"port,omitempty"`
-	AltPort      int       `json:"alt_port,omitempty"`
-	Mode         stun.Mode `json:"mode,omitempty"`
-	RelayPorts   string    `json:"relay_ports,omitempty"`
-	MaxClients   int       `json:"max_clients,omitempty"`
-	DirectWindow float64   `json:"direct_window_seconds,omitempty"`
+	ShareWith string `json:"share_with,omitempty"`
+	// ShareTransportWith joins a common SDK transport, including its relay and
+	// adaptive policy. Unlike ShareWith this requires the same wire version.
+	ShareTransportWith string    `json:"share_transport_with,omitempty"`
+	Port               int       `json:"port,omitempty"`
+	AltPort            int       `json:"alt_port,omitempty"`
+	Mode               stun.Mode `json:"mode,omitempty"`
+	RelayPorts         string    `json:"relay_ports,omitempty"`
+	MaxClients         int       `json:"max_clients,omitempty"`
+	DirectWindow       float64   `json:"direct_window_seconds,omitempty"`
 }
 
 func LoadConfig() (Config, error) {
