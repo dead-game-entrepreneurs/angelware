@@ -63,8 +63,17 @@ when it is absent. Game settings are decoded by that game's factory with unknown
 Database credentials may remain in `ANGELWARE_DATABASE_URL`.
 
 TCP listeners group compatible games by bind address and port. Auth routes by title ID; lobby
-routes by ticket. UDP discovery packets carry no auth title ID, so games with overlapping UDP
-ports need separate bind IPs. DNS does not provide a second routing key after a datagram arrives.
+routes by ticket. UDP discovery packets carry no auth title ID. A definition declares its SDK
+wire version and whether it uses an independent native peer transport. Such a game can set
+`stun.share_with` to another enabled listener with a different version. Bind/public addresses
+must match, aliases cannot chain, and aliases cannot override the owner's socket settings.
+
+The shared listener creates a separate direct discovery router with no SDK relay allocator or
+peer-rewrite callback. IP/NAT packets select it by wire version; later packed-v2 traversal
+follows the endpoint learned during discovery. A new explicit discovery updates ownership.
+Peers and rate limits remain scoped to each router, so OutRun clients do not consume WWE's
+relay capacity or inherit its adaptive NAT policy. Games with indistinguishable discovery
+formats still need separate addresses/listeners. DNS is not a UDP routing key.
 A runtime may also provide `game.PacketService` instances for its native peer transport; the
 application validates their UDP binds, starts them, and cancels/joins them with the other services.
 Startup rejects overlapping discovery/native sockets and conflicting TCP wildcard binds. Relay ranges

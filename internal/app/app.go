@@ -55,6 +55,14 @@ func Build(c Config, definitions []game.Definition, db store.Database, log *slog
 		game string
 	}
 	var udp []socket
+	owners := map[string]*stun.Server{}
+	type sharedDiscovery struct {
+		game, owner  string
+		bind, public netip.Addr
+		version      uint16
+		log          *slog.Logger
+	}
+	var shared []sharedDiscovery
 	for _, spec := range c.Games {
 		d, ok := registry[spec.Game]
 		if !ok {
@@ -77,7 +85,17 @@ func Build(c Config, definitions []game.Definition, db store.Database, log *slog
 		}
 		glog := log.With("game", d.Key)
 		var connectivity *stun.Server
-		if d.STUNPort != 0 {
+		if spec.STUN.ShareWith != "" {
+			if !d.DiscoveryOnly || d.DiscoveryVersion == 0 || d.STUNPort == 0 {
+				return nil, fmt.Errorf("%s cannot share discovery: native peer transport and an SDK wire version are required", d.Key)
+			}
+			sc := spec.STUN
+			sc.ShareWith = ""
+			if sc != (Connectivity{}) {
+				return nil, fmt.Errorf("%s: share_with cannot override discovery listener settings", d.Key)
+			}
+			shared = append(shared, sharedDiscovery{d.Key, spec.STUN.ShareWith, bind, public, d.DiscoveryVersion, glog.With("svc", "stun")})
+		} else if d.STUNPort != 0 {
 			sc := spec.STUN
 			if sc.Port == 0 {
 				sc.Port = d.STUNPort
@@ -113,7 +131,8 @@ func Build(c Config, definitions []game.Definition, db store.Database, log *slog
 				}
 				udp = append(udp, socket{bind, port, d.Key})
 			}
-			connectivity = &stun.Server{Config: cfg, Bind: spec.Bind, Log: glog.With("svc", "stun")}
+			connectivity = &stun.Server{Config: cfg, Bind: spec.Bind, Log: glog.With("svc", "stun"), DiscoveryVersion: d.DiscoveryVersion}
+			owners[d.Key] = connectivity
 		} else if spec.STUN.Port != 0 || spec.STUN.AltPort != 0 || spec.STUN.Mode != "" {
 			return nil, fmt.Errorf("%s has no connectivity service", d.Key)
 		}
@@ -175,6 +194,21 @@ func Build(c Config, definitions []game.Definition, db store.Database, log *slog
 			a := *runtime.Auth
 			a.TitleID = title
 			tcp.Auth[title] = &a
+		}
+	}
+	// Resolve references after every runtime has been built, so config order is
+	// irrelevant. Sharing aliases cannot chain and never acquire the owner's
+	// relay object or game-specific rewrite callbacks.
+	for _, share := range shared {
+		owner := owners[share.owner]
+		if owner == nil {
+			return nil, fmt.Errorf("%s: discovery owner %q must have its own enabled listener", share.game, share.owner)
+		}
+		if owner.Bind != share.bind.String() || owner.PublicIP != share.public {
+			return nil, fmt.Errorf("%s: shared discovery must use the owner's bind and public_ip", share.game)
+		}
+		if err := owner.AddDiscovery(share.version, share.log); err != nil {
+			return nil, fmt.Errorf("%s: %w", share.game, err)
 		}
 	}
 	return app, nil

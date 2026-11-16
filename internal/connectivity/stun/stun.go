@@ -28,11 +28,16 @@ type Server struct {
 	Config
 	Bind string
 	Log  *slog.Logger
+	// DiscoveryVersion identifies the owning game's IP/NAT wire format when
+	// sharing is enabled. Unshared listeners keep their legacy version support.
+	DiscoveryVersion uint16
 
-	mu     sync.Mutex
-	router *Router
-	ports  [2]*net.UDPConn
-	relays map[int]*net.UDPConn
+	mu        sync.Mutex
+	router    *Router
+	profiles  map[uint16]*slog.Logger
+	discovery map[uint16]*Router
+	ports     [2]*net.UDPConn
+	relays    map[int]*net.UDPConn
 }
 
 // Run serves until ctx ends.
@@ -43,6 +48,7 @@ func (s *Server) Run(ctx context.Context) error {
 	s.mu.Lock()
 	s.relays = map[int]*net.UDPConn{}
 	s.router = NewRouter(s.Config, s.Log, s.allocate, s.release)
+	s.initDiscovery()
 	s.mu.Unlock()
 	for i, port := range []int{s.Port, s.AltPort} {
 		c, err := listen(s.Bind, port)
@@ -62,7 +68,7 @@ func (s *Server) Run(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			s.read(c, func(b []byte, from netip.AddrPort) []Outbound {
-				return s.router.Route(b, from, Listener{Alt: i == 1}, time.Now())
+				return s.routeDiscovery(b, from, Listener{Alt: i == 1}, time.Now())
 			})
 		}()
 	}
@@ -77,6 +83,9 @@ func (s *Server) Run(ctx context.Context) error {
 		case <-t.C:
 			s.mu.Lock()
 			out := s.router.Tick(time.Now())
+			for _, r := range s.discovery {
+				out = append(out, r.Tick(time.Now())...)
+			}
 			s.dispatch(out)
 		}
 	}

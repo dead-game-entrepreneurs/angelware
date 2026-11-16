@@ -23,7 +23,11 @@ type Definition struct {
 	TitleIDs                   []uint32
 	TCPPort, STUNPort, AltPort int
 	Mode                       stun.Mode
-	New                        func(Options) (Runtime, error)
+	// DiscoveryOnly titles use their own native peer transport. They can share
+	// discovery sockets when their SDK wire version differs from the owner.
+	DiscoveryVersion uint16
+	DiscoveryOnly    bool
+	New              func(Options) (Runtime, error)
 }
 type Options struct {
 	Bind         netip.Addr

@@ -25,6 +25,7 @@ type GameConfig struct {
 	Options  json.RawMessage `json:"options,omitempty"`
 }
 type Connectivity struct {
+	ShareWith    string    `json:"share_with,omitempty"`
 	Port         int       `json:"port,omitempty"`
 	AltPort      int       `json:"alt_port,omitempty"`
 	Mode         stun.Mode `json:"mode,omitempty"`

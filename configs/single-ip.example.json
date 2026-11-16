@@ -1,0 +1,26 @@
+{
+  "auth_mode": "verify",
+  "log_level": "info",
+  "games": [
+    {
+      "game": "svr2007",
+      "bind": "203.0.113.10",
+      "public_ip": "203.0.113.10",
+      "stun": { "mode": "adaptive" },
+      "options": { "relay_rewrite": true, "observer": true }
+    },
+    {
+      "game": "outrun2006",
+      "bind": "203.0.113.10",
+      "public_ip": "203.0.113.10",
+      "stun": { "share_with": "svr2007" },
+      "options": { "native_relay": true, "ascending_boards": [] }
+    },
+    {
+      "game": "codbro",
+      "bind": "203.0.113.10",
+      "public_ip": "203.0.113.10",
+      "stun": { "mode": "adaptive", "relay_ports": "20000-20199" }
+    }
+  ]
+}

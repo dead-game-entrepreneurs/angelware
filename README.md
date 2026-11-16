@@ -167,12 +167,17 @@ The JSON file selects enabled games. Each entry supplies `game`, `bind`, `public
 `tcp_port`, `stun`, and game-specific `options`. Unknown game names and options fail startup.
 Defaults come from the game's definition. Empty `games` is an error.
 
-WWE and OutRun both expect UDP 3074/3075. Give them separate IP addresses assigned to the server
-and bind each game to its own address; direct its DNS names to that game's reachable IP.
-A wildcard bind overlaps every local address. Startup rejects conflicting discovery sockets.
-TCP listeners can share a socket when the auth title IDs differ, but DNS names cannot distinguish
-two games arriving on the same UDP socket. CoD BRO uses UDP 2273/2274 and can share WWE's IP.
-Behind NAT, forward each game's ports to its corresponding bind address.
+WWE and OutRun can share one IPv4 and UDP 3074/3075 with the explicit configuration in
+[`configs/single-ip.example.json`](configs/single-ip.example.json). Set OutRun's
+`stun.share_with` to `svr2007` and give both entries the same `bind` and `public_ip`. The listener
+routes OutRun's padded v1 discovery into its own direct router and WWE's packed v2 into its
+existing router. Their peer state, NAT policy and relay capacity remain separate. OutRun's
+optional native gameplay relay still uses UDP 3658; this does not enable adaptive OutRun gameplay.
+
+Games with the same discovery version, or which need separate SDK peer-relay policies, still
+need separate addresses/listeners. Sharing is opt-in and validated; ambiguous binds fail startup.
+TCP auth/lobby routes by title ID and ticket. CoD BRO uses UDP 2273/2274 on the same IP.
+Behind NAT, forward the selected ports to the configured server bind address.
 
 Account names and passwords are shared across games. Rooms, profiles, friends, mailbox, statistics,
 and uploaded files remain separate. Existing gameplay records migrate into `svr2007`; existing

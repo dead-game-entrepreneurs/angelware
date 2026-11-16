@@ -93,3 +93,35 @@ func TestOptionalNativeTransportAndPortConflicts(t *testing.T) {
 		t.Fatalf("missing native UDP conflict: %v", err)
 	}
 }
+
+func TestSharedDiscoveryResolvesAfterOwnerAndPreservesGameIsolation(t *testing.T) {
+	config := Config{Games: []GameConfig{
+		{Game: outrun2006.Key, Bind: "127.0.0.1", PublicIP: "127.0.0.1", STUN: Connectivity{ShareWith: svr2007.Key}, Options: []byte(`{"native_relay":true}`)},
+		{Game: svr2007.Key, Bind: "127.0.0.1", PublicIP: "127.0.0.1", STUN: Connectivity{Mode: stun.Adaptive}},
+	}}
+	app, err := buildForTest(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(app.TCP) != 1 || len(app.UDP) != 1 || len(app.Services) != 1 {
+		t.Fatal("shared discovery bound duplicate sockets or lost native relay")
+	}
+	if len(app.TCP["127.0.0.1:3074"].Auth) != 2 {
+		t.Fatal("shared TCP title routing lost")
+	}
+	for name, edit := range map[string]func(*Config){
+		"missing owner":     func(c *Config) { c.Games = c.Games[:1] },
+		"override":          func(c *Config) { c.Games[0].STUN.Port = 13074 },
+		"different address": func(c *Config) { c.Games[0].Bind = "127.0.0.2" },
+		"traversal owner":   func(c *Config) { c.Games[1].STUN = Connectivity{ShareWith: outrun2006.Key} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := config
+			c.Games = append([]GameConfig(nil), config.Games...)
+			edit(&c)
+			if _, err := buildForTest(c); err == nil {
+				t.Fatal("ambiguous discovery sharing accepted")
+			}
+		})
+	}
+}

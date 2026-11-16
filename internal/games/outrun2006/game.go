@@ -24,7 +24,7 @@ type Settings struct {
 }
 
 func Definition() game.Definition {
-	return game.Definition{Key: Key, TitleIDs: []uint32{TitleID}, TCPPort: 3074, STUNPort: 3074, AltPort: 3075, Mode: stun.Direct, New: New}
+	return game.Definition{Key: Key, TitleIDs: []uint32{TitleID}, TCPPort: 3074, STUNPort: 3074, AltPort: 3075, Mode: stun.Direct, DiscoveryVersion: 1, DiscoveryOnly: true, New: New}
 }
 func New(o game.Options) (game.Runtime, error) {
 	var settings Settings

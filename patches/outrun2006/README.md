@@ -18,6 +18,8 @@ play quality still needs broader tester feedback.
 
 1. On the server, set OutRun's `options.native_relay` to `true`. Keep its `stun.mode` as `direct`.
    Allow UDP **3658** to the OutRun server address as well as the existing login/discovery ports.
+   For a single-IP server use `stun: {"share_with":"svr2007"}` instead of the separate
+   direct listener, as shown in `configs/single-ip.example.json`.
    Restart AngelWare. This option is off by default and independent of WWE's relay.
 2. On **both** PCs, put [SLUS-21274_38C16493.pnach](SLUS-21274_38C16493.pnach) in PCSX2's
    **patches** folder. Use Settings → Folders to find the active data directory.

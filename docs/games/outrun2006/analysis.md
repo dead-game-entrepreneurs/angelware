@@ -20,8 +20,10 @@ are a different transport. The PSP build `ULUS-10064` is a separate target and i
 | `outrun2.stun.eu.demonware.net` | UDP discovery and traversal |
 | `outrun2.stun.us.demonware.net` | UDP discovery and traversal |
 
-Generic `stun.{eu,us,jp,au}.demonware.net` names also occur in the SDK. Use a reachable address
-separate from WWE when both games use UDP 3074/3075. The disc includes `DNAS310.IMG`; AngelWare
+Generic `stun.{eu,us,jp,au}.demonware.net` names also occur in the SDK. Both games can use one
+reachable IPv4 by setting OutRun's `stun.share_with` to `svr2007`: padded v1 discovery and
+its peer state are isolated from WWE's packed v2 router on the shared UDP 3074/3075 sockets.
+A separate bind address remains supported. The disc includes `DNAS310.IMG`; AngelWare
 does not replace DNAS.
 
 ## Protocol layouts
