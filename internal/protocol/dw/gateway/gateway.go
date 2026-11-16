@@ -83,6 +83,7 @@ type Task struct {
 	Args                   *bitbuf.Reader
 	Protocol               frame.Protocol
 	Transaction            uint64
+	SignedStatus           bool // application-selected I32 result code; default U32
 }
 
 // Serve runs a gateway connection that opened with hello.
@@ -242,17 +243,25 @@ func (c *Conn) writer() {
 // Reply is a task result without a list: u32 error 0, u8 task id, then fields
 // (a single result object, e.g. a profile).
 func Reply(t Task, fields []bitbuf.Field) []byte {
-	return replyHeader(t).U32(0).U8(t.ID).Fields(fields).Bytes()
+	return replyStatus(t, 0).U8(t.ID).Fields(fields).Bytes()
 }
 
 // ErrorReply fails a task: the client reads the non-zero error and nothing after it.
 func ErrorReply(t Task, code uint32) []byte {
-	return replyHeader(t).U32(code).Bytes()
+	return replyStatus(t, code).Bytes()
 }
 
 // ListReply is a task result carrying count items (fields holds all of them).
 func ListReply(t Task, count uint32, fields []bitbuf.Field) []byte {
-	return replyHeader(t).U32(0).U8(t.ID).U32(count).Fields(fields).Bytes()
+	return replyStatus(t, 0).U8(t.ID).U32(count).Fields(fields).Bytes()
+}
+
+func replyStatus(t Task, code uint32) *bitbuf.Writer {
+	typ := uint8(bitbuf.U32)
+	if t.SignedStatus {
+		typ = bitbuf.I32
+	}
+	return replyHeader(t).Field(bitbuf.Int(typ, uint64(code)))
 }
 
 func replyHeader(t Task) *bitbuf.Writer {

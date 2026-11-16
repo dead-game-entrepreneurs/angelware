@@ -60,12 +60,13 @@ func newTCP(mode auth.Mode) (*TCP, *store.Memory) {
 // client plays the console's side of one TCP connection. A reader goroutine
 // sorts incoming frames into replies and pushes (gateway message 2).
 type client struct {
-	t       *testing.T
-	conn    net.Conn
-	replies chan frame.Frame
-	pushes  chan frame.Frame
-	key     []byte
-	seed    uint32
+	t            *testing.T
+	conn         net.Conn
+	replies      chan frame.Frame
+	pushes       chan frame.Frame
+	key          []byte
+	seed         uint32
+	signedStatus bool
 }
 
 func dial(t *testing.T, s *TCP) *client {
@@ -213,8 +214,15 @@ func (c *client) taskStatus(service, slot, id uint8, args ...bitbuf.Field) (*bit
 	if f.Type != 1 || gotSlot != slot {
 		c.t.Fatalf("reply type %d slot %d", f.Type, gotSlot)
 	}
-	code, _ := r.U32()
-	return r, code
+	status, err := r.Field()
+	want := uint8(bitbuf.U32)
+	if c.signedStatus {
+		want = bitbuf.I32
+	}
+	if err != nil || status.Type != want {
+		c.t.Fatalf("invalid status type: got %d want %d, err %v", status.Type, want, err)
+	}
+	return r, uint32(status.Int)
 }
 
 func TestSignupAndVerifiedLogin(t *testing.T) {
@@ -234,8 +242,8 @@ func TestSignupAndVerifiedLogin(t *testing.T) {
 
 	if reply := dial(t, s).roundTrip(login("nobody")); reply.Type != 0x0B {
 		t.Fatalf("unknown login reply type %#x", reply.Type)
-	} else if _, code := status(t, reply); code == 700 {
-		t.Fatal("unknown account logged in")
+	} else if _, code := status(t, reply); code != 704 {
+		t.Fatalf("unknown account status %d, want BD_AUTH_BAD_ACCOUNT (704)", code)
 	}
 }
 

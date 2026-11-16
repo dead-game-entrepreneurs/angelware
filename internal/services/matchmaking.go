@@ -27,9 +27,12 @@ import (
 type Matchmaking struct {
 	// Disclosed and Removed let a game admit its own peer transport. Callbacks
 	// run under the matchmaking lock and must not call back into Matchmaking.
-	Disclosed           func(room [8]byte, host, viewer any)
-	Removed             func(room [8]byte)
-	MaxResults          int
+	Disclosed  func(room [8]byte, host, viewer any)
+	Removed    func(room [8]byte)
+	MaxResults int
+	// AddressSize selects the SDK's serialized CommonAddr layout (default 25).
+	AddressSize         int
+	EncodeReply         func(Task, uint32, []bitbuf.Field) []byte
 	Log                 *slog.Logger
 	ObserveConnectivity func(ConnectivityEvent)
 	Search              SearchPolicy
@@ -68,7 +71,10 @@ func NewMatchmaking(log *slog.Logger) *Matchmaking {
 	return &Matchmaking{Log: log, sessions: map[[8]byte]*mmSession{}}
 }
 
-func mmReply(t Task, count uint32, fields []bitbuf.Field) []byte {
+func (m *Matchmaking) reply(t Task, count uint32, fields []bitbuf.Field) []byte {
+	if m.EncodeReply != nil {
+		return m.EncodeReply(t, count, fields)
+	}
 	return ListReply(t, count, fields)
 }
 
@@ -77,13 +83,17 @@ func (m *Matchmaking) Handle(owner any, t Task) []byte {
 	fields, err := t.Args.Fields()
 	if err != nil || len(fields) < 1 {
 		m.Log.Warn("matchmaking task did not parse", "task", t.ID, "err", err)
-		return mmReply(t, 0, nil)
+		return m.reply(t, 0, nil)
 	}
 	args := fields[1:] // skip the leading u8 (always 0 so far)
 
 	switch t.ID {
 	case mmCreate, mmUpdate:
-		if !validBase(args) {
+		addressSize := m.AddressSize
+		if addressSize == 0 {
+			addressSize = 25
+		}
+		if !validBase(args, addressSize) {
 			return ErrorReply(t, 1)
 		}
 		if m.Validate != nil {
@@ -97,7 +107,7 @@ func (m *Matchmaking) Handle(owner any, t Task) []byte {
 			return m.create(owner, t, args)
 		}
 		m.update(owner, args)
-		return mmReply(t, 0, nil)
+		return m.reply(t, 0, nil)
 	case mmDelete:
 		if len(args) > 0 && len(args[0].Bytes) == 8 {
 			m.mu.Lock()
@@ -111,7 +121,7 @@ func (m *Matchmaking) Handle(owner any, t Task) []byte {
 			m.mu.Unlock()
 			m.Log.Info("session deleted", "session", fmt.Sprintf("%x", args[0].Bytes))
 		}
-		return mmReply(t, 0, nil)
+		return m.reply(t, 0, nil)
 	case mmFindByID:
 		if len(args) > 0 && len(args[0].Bytes) == 8 {
 			m.mu.Lock()
@@ -128,10 +138,10 @@ func (m *Matchmaking) Handle(owner any, t Task) []byte {
 			}
 			m.mu.Unlock()
 			if entry != nil {
-				return mmReply(t, 1, info)
+				return m.reply(t, 1, info)
 			}
 		}
-		return mmReply(t, 0, nil)
+		return m.reply(t, 0, nil)
 	case mmFind:
 		results := m.search(owner, args)
 		var out []bitbuf.Field
@@ -142,10 +152,10 @@ func (m *Matchmaking) Handle(owner any, t Task) []byte {
 		total := len(m.sessions)
 		m.mu.RUnlock()
 		m.Log.Info("find sessions", "returned", len(results), "open", total, "query_fields", len(args))
-		return mmReply(t, uint32(len(results)), out)
+		return m.reply(t, uint32(len(results)), out)
 	}
 	m.Log.Info("matchmaking task not implemented", "task", t.ID)
-	return mmReply(t, 0, nil)
+	return m.reply(t, 0, nil)
 }
 
 func (m *Matchmaking) create(owner any, t Task, info []bitbuf.Field) []byte {
@@ -167,7 +177,7 @@ func (m *Matchmaking) create(owner any, t Task, info []bitbuf.Field) []byte {
 		event.Created = true
 		m.ObserveConnectivity(event)
 	}
-	return mmReply(t, 1, []bitbuf.Field{bitbuf.Bytes(bitbuf.Blob, id[:]), bitbuf.Bytes(bitbuf.Blob, key)})
+	return m.reply(t, 1, []bitbuf.Field{bitbuf.Bytes(bitbuf.Blob, id[:]), bitbuf.Bytes(bitbuf.Blob, key)})
 }
 
 func (m *Matchmaking) update(owner any, info []bitbuf.Field) {
@@ -268,11 +278,11 @@ func (m *Matchmaking) search(owner any, query []bitbuf.Field) [][]bitbuf.Field {
 	return out
 }
 
-func validBase(info []bitbuf.Field) bool {
+func validBase(info []bitbuf.Field, addressSize int) bool {
 	if len(info) < 7 {
 		return false
 	}
-	for i, n := range []int{25, 8, 16} {
+	for i, n := range []int{addressSize, 8, 16} {
 		if info[i].Type != bitbuf.Blob || len(info[i].Bytes) != n {
 			return false
 		}

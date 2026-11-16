@@ -78,26 +78,38 @@ Database credentials may remain in `ANGELWARE_DATABASE_URL`.
 
 TCP listeners group compatible games by bind address and port. Auth routes by title ID; lobby
 routes by ticket. UDP discovery packets carry no auth title ID. A definition declares its SDK
-wire version and whether it uses an independent native peer transport. Such a game can set
-`stun.share_with` to another enabled listener with a different version. Bind/public addresses
-must match, aliases cannot chain, and aliases cannot override the owner's socket settings.
+discovery version and whether it uses an independent native peer transport. Such a game can
+set `stun.share_with` to another enabled listener. Bind/public addresses must match,
+aliases cannot chain, and aliases cannot override the owner's socket settings. DNS names
+are not a UDP routing key.
 
-The shared listener creates a separate direct discovery router with no SDK relay allocator or
-peer-rewrite callback. IP/NAT packets select it by wire version; later packed-v2 traversal
-follows the endpoint learned during discovery. A new explicit discovery updates ownership.
-Peers and rate limits remain scoped to each router, so OutRun clients do not consume WWE's
-relay capacity or inherit its adaptive NAT policy. DNS is not a UDP routing key.
+Compatible SDK titles may instead set `stun.share_transport_with`. Supported discovery
+versions can differ: both use packed-v2 traversal. Definitions must use the same discovery
+ports. Members inherit one owner's complete SDK router, relay capacity and adaptive policy.
+Bind/public addresses must match; native-transport members, setting overrides, cycles and
+alias chains are rejected. Discovery replies retain each request's wire format.
 
-Compatible SDK titles with the same discovery version may instead set
-`stun.share_transport_with`. They inherit one owner's complete SDK router, relay capacity and
-adaptive policy. Bind/public addresses and wire versions must match; native-transport titles,
-setting overrides, cycles and alias chains are rejected. Generic UDP discovery cannot identify
-the game. Application room lookup and lobby tickets remain game-scoped, and encrypted peer
-protocols authenticate their own sessions. Game-owned rewrite hooks must verify their own
-room/key bindings before modifying anything; their registry is frozen before serving packets.
-WWE's direct-completion observer retains its authenticated room-generation checks and declines
-ambiguous endpoint matches. Shared UDP logs identify the transport rather than guessing a title.
-Independent per-title NAT/relay policies still require separate listeners.
+A native-only discovery version gets an independent direct router without an SDK relay
+allocator or peer hook. Traversal follows the endpoint learned during discovery; a new
+explicit discovery updates ownership. If a native title and an SDK member use the same
+discovery version, their packets are indistinguishable. That version instead uses the common
+SDK router under direct or adaptive policy. Always-relay mode is rejected because its
+virtual advertised addresses would break native transport. These overlapping clients share
+peer state, admission limits and relay capacity; native gameplay still uses its own service.
+Thus OutRun remains separate when sharing only with v2 SDK games, and joins the common
+real-address discovery policy when v1 Stacked is also enabled. No title is guessed from IP,
+source port, uninitialized padding or DNS history. TCP authentication identifies the
+account/title but supplies no UDP endpoint; discovery can precede login, and multiple
+clients behind NAT share the TCP source IP. A client MAC is not visible across routed
+networks. Room records can associate a host endpoint later, but do not identify the
+initial discovery socket or every searcher's UDP endpoint.
+
+Application room lookup and lobby tickets remain game-scoped, and encrypted peer protocols
+authenticate their own sessions. Game-owned rewrite hooks must verify their own room/key
+bindings before modifying anything; their registry is frozen before serving packets. WWE's
+direct-completion observer retains its authenticated room-generation checks and declines
+ambiguous endpoint matches. Shared UDP logs identify the transport rather than guessing a
+title. Independent per-title NAT/relay policies require separate listeners.
 A runtime may also provide `game.PacketService` instances for its native peer transport; the
 application validates their UDP binds, starts them, and cancels/joins them with the other services.
 Startup rejects overlapping discovery/native sockets and conflicting TCP wildcard binds. Relay ranges

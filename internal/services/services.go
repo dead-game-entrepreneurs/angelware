@@ -38,12 +38,15 @@ type Server struct {
 	Matchmaking *Matchmaking
 	Log         *slog.Logger
 	// MessageFields selects a game's notification codec for both push and fetch.
-	// Nil uses the legacy shared codec.
-	MessageFields func(store.Message) []bitbuf.Field
-	handlers      map[uint8]Handler
-	mu            sync.Mutex
-	online        map[uint64]*Conn
-	invites       map[[2]uint64]invite
+	// Nil uses the legacy shared codec; a nil result omits unsupported messages.
+	MessageFields    func(store.Message) []bitbuf.Field
+	SignedTaskStatus bool
+	// PollNotifications disables unsolicited pushes for SDKs that fetch their inbox.
+	PollNotifications bool
+	handlers          map[uint8]Handler
+	mu                sync.Mutex
+	online            map[uint64]*Conn
+	invites           map[[2]uint64]invite
 }
 type Conn struct {
 	srv    *Server
@@ -70,6 +73,7 @@ func (s *Server) Open(ctx context.Context, client gateway.Client) gateway.Handle
 	return c
 }
 func (c *Conn) Handle(ctx context.Context, t Task) []byte {
+	t.SignedStatus = c.srv.SignedTaskStatus
 	if h := c.srv.handlers[t.Service]; h != nil {
 		return h(ctx, c, t)
 	}
@@ -91,7 +95,7 @@ func MatchmakingHandler(m *Matchmaking) Handler {
 	return func(_ context.Context, c *Conn, t Task) []byte { return m.Handle(c, t) }
 }
 func Friends() Handler {
-	return func(ctx context.Context, c *Conn, t Task) []byte { return c.friends(ctx, t) }
+	return FriendsWithOptions(FriendsOptions{})
 }
 func Mailbox() Handler {
 	return func(ctx context.Context, c *Conn, t Task) []byte { return c.mailbox(ctx, t) }
@@ -108,7 +112,14 @@ func Fields(t Task) ([]bitbuf.Field, error) { return t.Args.Fields() }
 
 // push sends one mailbox message to this client right away, without blocking.
 func (c *Conn) push(m store.Message) {
-	payload := bitbuf.NewWriter(true).Fields(c.srv.messageFields(m)).Bytes()
+	if c.srv.PollNotifications {
+		return
+	}
+	fields := c.srv.messageFields(m)
+	if len(fields) == 0 {
+		return
+	}
+	payload := bitbuf.NewWriter(true).Fields(fields).Bytes()
 	if !c.client.TrySend(msgPush, payload) {
 		c.log.Warn("push dropped: client queue full", "type", m.Type)
 	}

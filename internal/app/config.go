@@ -27,7 +27,8 @@ type GameConfig struct {
 type Connectivity struct {
 	ShareWith string `json:"share_with,omitempty"`
 	// ShareTransportWith joins a common SDK transport, including its relay and
-	// adaptive policy. Unlike ShareWith this requires the same wire version.
+	// adaptive policy. Members must use the same discovery ports; supported
+	// discovery versions can differ because their traversal format is shared.
 	ShareTransportWith string    `json:"share_transport_with,omitempty"`
 	Port               int       `json:"port,omitempty"`
 	AltPort            int       `json:"alt_port,omitempty"`

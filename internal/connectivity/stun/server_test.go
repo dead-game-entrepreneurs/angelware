@@ -52,7 +52,10 @@ func answerProbes(c *net.UDPConn) {
 func TestServerRelaysOverUDP(t *testing.T) {
 	lo := freePort(t)
 	s := &Server{Config: Config{PublicIP: netip.MustParseAddr("127.0.0.1"), Port: freePort(t), AltPort: freePort(t),
-		Mode: Relay, RelayLo: lo, RelayHi: lo + 3, RelayMaxClients: 2}, Bind: "127.0.0.1", Log: discard}
+		Mode: Relay, RelayLo: lo, RelayHi: lo + 3, RelayMaxClients: 2}, Bind: "127.0.0.1", Log: discard, DiscoveryVersion: 2}
+	if err := s.AddTransport(1); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error)
@@ -69,9 +72,19 @@ func TestServerRelaysOverUDP(t *testing.T) {
 		}
 		defer c.Close()
 		conns[i] = c
-		c.WriteToUDPAddrPort(unhex("1e000100"), stun)
+		// One padded-v1 and one packed-v2 client use the same actual sockets
+		// and allocator. The reply must retain each client's discovery format.
+		version := uint16(i + 1)
+		c.WriteToUDPAddrPort(header(ipRequest, version), stun)
 		_, reply := console(t, c)
-		virtual[i] = unpackAddr(reply[4:10])
+		offset := 3
+		if version == 1 {
+			offset = 4
+		}
+		if len(reply) != len(ipReplyPacket(version, stun)) {
+			t.Fatal("wrong shared discovery reply format")
+		}
+		virtual[i] = unpackAddr(reply[offset : offset+6])
 		if virtual[i].Port() < uint16(lo) || virtual[i].Port() > uint16(lo+3) {
 			t.Fatalf("advertised %v outside the relay range", virtual[i])
 		}

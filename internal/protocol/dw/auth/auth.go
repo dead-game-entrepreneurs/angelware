@@ -41,9 +41,11 @@ import (
 
 const (
 	statusOK = 700
-	// Any status other than 700 fails the request on the client. The DemonWare
-	// error numbering for these cases is not known, so one value is used.
+	// BD_AUTH_BAD_REQUEST: malformed requests and unclassified failures.
 	statusFailed = 701
+	// BD_AUTH_BAD_ACCOUNT. Stacked's combined Create User / Login flow maps
+	// 704 to its signup branch (SLUS-212.59 0x1f3c48 -> 0x1ffe68).
+	statusBadAccount = 704
 	// SLUS-212.74 0x12bc88 selects the username-exists UI for 0x2c3.
 	statusUsernameExists = 707
 
@@ -276,7 +278,7 @@ func (s *Service) login(ctx context.Context, log *slog.Logger, userID uint64) (f
 	case errors.Is(err, store.ErrNotFound) && s.Mode == Open:
 	case errors.Is(err, store.ErrNotFound):
 		log.Info("login for unknown account", "user", fmt.Sprintf("%016x", userID))
-		return status(replyTicketKeyed, statusFailed), nil
+		return status(replyTicketKeyed, statusBadAccount), nil
 	default:
 		return frame.Frame{}, err
 	}

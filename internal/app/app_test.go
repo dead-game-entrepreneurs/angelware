@@ -1,8 +1,10 @@
 package app
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 
@@ -11,14 +13,58 @@ import (
 	"github.com/princebyyourlogic/angelware/internal/games/codbro"
 	"github.com/princebyyourlogic/angelware/internal/games/familyfeud"
 	"github.com/princebyyourlogic/angelware/internal/games/outrun2006"
+	"github.com/princebyyourlogic/angelware/internal/games/stacked"
 	"github.com/princebyyourlogic/angelware/internal/games/svr2007"
 	"github.com/princebyyourlogic/angelware/internal/games/wsop2008"
 	"github.com/princebyyourlogic/angelware/internal/protocol/dw/frame"
 	"github.com/princebyyourlogic/angelware/internal/storage"
 )
 
+func TestSingleIPExampleIncludesMixedSDKAndNativeDiscovery(t *testing.T) {
+	b, err := os.ReadFile("../../configs/single-ip.example.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c Config
+	if err := json.Unmarshal(b, &c); err != nil {
+		t.Fatal(err)
+	}
+	a, err := buildForTest(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.TCP) != 1 || len(a.UDP) != 2 || len(a.Services) != 1 || len(a.UDP[0].Games) != 4 {
+		t.Fatal("single-IP example lost a game or created duplicate listeners")
+	}
+	tcp := a.TCP["203.0.113.10:3074"]
+	if len(tcp.Auth) != 5 || tcp.Auth[stacked.TitleID] == nil || tcp.Auth[wsop2008.TitleID] == nil {
+		t.Fatal("single-IP composition lost title routing")
+	}
+	// Resolution must not depend on whether v1 or v2 owns the common sockets.
+	for i := range c.Games {
+		switch c.Games[i].Game {
+		case stacked.Key:
+			c.Games[i].STUN = Connectivity{Mode: stun.Adaptive}
+		case svr2007.Key, familyfeud.Key, wsop2008.Key:
+			c.Games[i].STUN = Connectivity{ShareTransportWith: stacked.Key}
+		case outrun2006.Key:
+			c.Games[i].STUN = Connectivity{ShareWith: stacked.Key}
+		}
+	}
+	if a, err = buildForTest(c); err != nil || len(a.UDP) != 2 || a.UDP[0].Games[0] != stacked.Key || len(a.UDP[0].Games) != 4 {
+		t.Fatalf("v1 owner composition failed: %v", err)
+	}
+}
+
 func definitions() []game.Definition {
-	return []game.Definition{svr2007.Definition(), outrun2006.Definition(), codbro.Definition(), familyfeud.Definition(), wsop2008.Definition()}
+	return []game.Definition{svr2007.Definition(), outrun2006.Definition(), codbro.Definition(), familyfeud.Definition(), wsop2008.Definition(), stacked.Definition()}
+}
+
+func TestStackedStandaloneListener(t *testing.T) {
+	a, err := buildForTest(Config{Games: []GameConfig{{Game: stacked.Key, Bind: "127.0.0.1", PublicIP: "127.0.0.1"}}})
+	if err != nil || len(a.UDP) != 1 || a.UDP[0].DiscoveryVersion != 1 || a.UDP[0].Mode != stun.Adaptive || a.TCP["127.0.0.1:3074"].Auth[stacked.TitleID] == nil {
+		t.Fatalf("Stacked listener composition failed: %v", err)
+	}
 }
 
 func TestCommonSDKTransportAndDiscoveryOnlyChild(t *testing.T) {
@@ -51,7 +97,7 @@ func TestCommonSDKTransportAndDiscoveryOnlyChild(t *testing.T) {
 		"missing owner": func(c *Config) { c.Games = c.Games[:1] },
 		"self":          func(c *Config) { c.Games[0].STUN.ShareTransportWith = familyfeud.Key },
 		"cycle":         func(c *Config) { c.Games[2].STUN = Connectivity{ShareTransportWith: familyfeud.Key} },
-		"version mismatch": func(c *Config) {
+		"different discovery ports": func(c *Config) {
 			c.Games = append(c.Games, GameConfig{Game: "codbro", Bind: "127.0.0.1", PublicIP: "127.0.0.1"})
 			c.Games[0].STUN.ShareTransportWith = "codbro"
 		},

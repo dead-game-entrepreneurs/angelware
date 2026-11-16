@@ -107,6 +107,9 @@ func (c *Conn) statsRead(ctx context.Context, t Task, options StatsOptions) []by
 
 // statsReply is the read result: u32 count, u32 total, rows.
 func statsReply(t Task, rows []store.RankedRow, total int, options StatsOptions) []byte {
+	if options.EncodeReply != nil {
+		return options.EncodeReply(t, rows, total)
+	}
 	out := []bitbuf.Field{bitbuf.Int(bitbuf.U32, uint64(total))}
 	for _, r := range rows {
 		if options.EncodeRow != nil {
@@ -142,6 +145,7 @@ type StatsOptions struct {
 	DecodeWrite func([]bitbuf.Field) (store.StatsRow, error)
 	EncodeRow   func(store.RankedRow) []bitbuf.Field
 	ParseRead   func(uint8, []bitbuf.Field) (StatsRead, error)
+	EncodeReply func(Task, []store.RankedRow, int) []byte
 }
 
 func (o StatsOptions) ascending(board int32) bool { return o.Ascending != nil && o.Ascending(board) }

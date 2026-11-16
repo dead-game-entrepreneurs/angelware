@@ -187,6 +187,9 @@ func (c *Conn) mailbox(ctx context.Context, t Task) []byte {
 
 // Notify stores a message for its recipient and pushes it if they are online.
 func (s *Server) Notify(ctx context.Context, m store.Message) {
+	if len(s.messageFields(m)) == 0 {
+		return
+	}
 	id, err := s.Store.Enqueue(ctx, m)
 	if err != nil {
 		s.Log.Error("queue message", "err", err, "type", m.Type, "to", fmt.Sprintf("%016x", m.To))

@@ -24,7 +24,8 @@ type Definition struct {
 	TCPPort, STUNPort, AltPort int
 	Mode                       stun.Mode
 	// DiscoveryOnly titles use their own native peer transport. They can share
-	// discovery sockets when their SDK wire version differs from the owner.
+	// discovery sockets using a separate wire-version router or, when the
+	// format overlaps an SDK member, its common real-address discovery policy.
 	DiscoveryVersion uint16
 	DiscoveryOnly    bool
 	New              func(Options) (Runtime, error)

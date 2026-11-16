@@ -32,19 +32,19 @@ import (
 // Friendships, requests and blocks persist; every notification goes through the
 // mailbox so a player who is offline sees it at their next login.
 const (
-	frPropose  = 1
-	frAccept   = 2
-	frReject   = 3
-	frRemove   = 4
-	frList     = 5
-	frBlock    = 6
-	frBlocks   = 7
-	frInvite   = 8
-	frInviteOK = 9
-	frInviteNo = 10
-	frMessage  = 12
-	frWithdraw = 13
-	frRequests = 19
+	FriendPropose      = 1
+	FriendAccept       = 2
+	FriendReject       = 3
+	FriendRemove       = 4
+	FriendList         = 5
+	FriendBlock        = 6
+	FriendBlocks       = 7
+	FriendInvite       = 8
+	FriendInviteAccept = 9
+	FriendInviteReject = 10
+	FriendMessage      = 12
+	FriendWithdraw     = 13
+	FriendRequests     = 19
 )
 
 // invite remembers the session of a sent invite so the answer can carry it back
@@ -64,13 +64,38 @@ func firstBlob(args []bitbuf.Field) []byte {
 	return nil
 }
 
-func (c *Conn) friends(ctx context.Context, t Task) []byte {
+// FriendsOptions adapts SDK operation numbers and list codecs while keeping the
+// shared persistence, duplicate filtering and invitation lifecycle.
+type FriendsOptions struct {
+	Decode          func(task uint8, fields []bitbuf.Field) (operation uint8, args []bitbuf.Field, err error)
+	EncodeListReply func(Task, uint32, []bitbuf.Field) []byte
+}
+
+func FriendsWithOptions(o FriendsOptions) Handler {
+	return func(ctx context.Context, c *Conn, t Task) []byte { return c.friends(ctx, t, o) }
+}
+
+func (c *Conn) friends(ctx context.Context, t Task, o FriendsOptions) []byte {
 	fields, err := t.Args.Fields()
 	if err != nil || len(fields) < 1 {
 		c.log.Warn("friends task did not parse", "task", t.ID, "err", err)
+		if o.Decode != nil {
+			return ErrorReply(t, 1)
+		}
 		return Reply(t, nil)
 	}
 	args := fields[1:]
+	operation := t.ID
+	if o.Decode != nil {
+		operation, args, err = o.Decode(t.ID, fields)
+		if err != nil {
+			return ErrorReply(t, 1)
+		}
+	}
+	listReply := ListReply
+	if o.EncodeListReply != nil {
+		listReply = o.EncodeListReply
+	}
 	st, me := c.srv.Store, c.sess.UserID
 
 	// Tasks that name another player carry their id first.
@@ -90,8 +115,8 @@ func (c *Conn) friends(ctx context.Context, t Task) []byte {
 		fail("resolve pending notification", st.ClearMessages(ctx, to, from, typ))
 	}
 
-	switch t.ID {
-	case frPropose:
+	switch operation {
+	case FriendPropose:
 		if other == 0 || other == me {
 			return Reply(t, nil)
 		}
@@ -127,14 +152,14 @@ func (c *Conn) friends(ctx context.Context, t Task) []byte {
 		} else {
 			c.log.Info("repeated friend request not sent again")
 		}
-	case frWithdraw:
+	case FriendWithdraw:
 		clear(me, other, msgFriendRequest)
 		if ok, err := st.RemoveFriendRequest(ctx, me, other); ok {
 			c.srv.Notify(ctx, note(other, msgFriendCanceled))
 		} else {
 			fail("withdraw friend request", err)
 		}
-	case frAccept:
+	case FriendAccept:
 		clear(other, me, msgFriendRequest)
 		ok, err := st.RemoveFriendRequest(ctx, other, me)
 		fail("accept friend request", err)
@@ -142,24 +167,24 @@ func (c *Conn) friends(ctx context.Context, t Task) []byte {
 			fail("save friendship", st.AddFriendship(ctx, me, other))
 			c.srv.Notify(ctx, note(other, msgFriendAccepted))
 		}
-	case frReject:
+	case FriendReject:
 		clear(other, me, msgFriendRequest)
 		if ok, err := st.RemoveFriendRequest(ctx, other, me); ok {
 			c.srv.Notify(ctx, note(other, msgFriendRejected))
 		} else {
 			fail("reject friend request", err)
 		}
-	case frRemove:
+	case FriendRemove:
 		fail("remove friend", st.RemoveFriendship(ctx, me, other))
-	case frRequests:
+	case FriendRequests:
 		list, err := st.FriendRequestsTo(ctx, me)
 		fail("load friend requests", err)
 		var out []bitbuf.Field
 		for _, f := range list {
 			out = append(out, bitbuf.Int(bitbuf.U64, f.UserID), bitbuf.Bytes(bitbuf.String, []byte(f.Name)))
 		}
-		return ListReply(t, uint32(len(list)), out)
-	case frList:
+		return listReply(t, uint32(len(list)), out)
+	case FriendList:
 		list, err := st.Friends(ctx, me)
 		fail("load friends", err)
 		var out []bitbuf.Field
@@ -171,12 +196,12 @@ func (c *Conn) friends(ctx context.Context, t Task) []byte {
 			out = append(out, bitbuf.Int(bitbuf.U64, f.UserID), bitbuf.Bytes(bitbuf.String, []byte(f.Name)),
 				bitbuf.Int(bitbuf.Bool, online))
 		}
-		return ListReply(t, uint32(len(list)), out)
-	case frBlock:
+		return listReply(t, uint32(len(list)), out)
+	case FriendBlock:
 		if len(args) >= 2 && other != 0 {
 			fail("save block", st.SetBlock(ctx, me, other, uint8(args[1].Int)))
 		}
-	case frBlocks:
+	case FriendBlocks:
 		list, err := st.Blocks(ctx, me)
 		fail("load blocks", err)
 		var out []bitbuf.Field
@@ -184,15 +209,15 @@ func (c *Conn) friends(ctx context.Context, t Task) []byte {
 			out = append(out, bitbuf.Int(bitbuf.U64, f.UserID), bitbuf.Bytes(bitbuf.String, []byte(f.Name)),
 				bitbuf.Int(bitbuf.U8, uint64(f.Level)))
 		}
-		return ListReply(t, uint32(len(list)), out)
-	case frMessage:
+		return listReply(t, uint32(len(list)), out)
+	case FriendMessage:
 		if blocked, _ := st.IsBlocked(ctx, other, me); blocked || other == 0 {
 			return Reply(t, nil)
 		}
 		m := note(other, msgFriendMessage)
 		m.Data = firstBlob(args)
 		c.srv.Notify(ctx, m)
-	case frInvite:
+	case FriendInvite:
 		if blocked, err := st.IsBlocked(ctx, other, me); blocked || err != nil || other == 0 || other == me {
 			return Reply(t, nil)
 		}
@@ -204,14 +229,14 @@ func (c *Conn) friends(ctx context.Context, t Task) []byte {
 		m := note(other, msgInvite)
 		m.Data = inv.session
 		c.srv.Notify(ctx, m)
-	case frInviteOK, frInviteNo:
+	case FriendInviteAccept, FriendInviteReject:
 		clear(other, me, msgInvite)
 		inv, pending := c.srv.takeInvite(other, me)
 		if !pending {
 			return Reply(t, nil)
 		}
 		typ := uint32(msgInviteAccepted)
-		if t.ID == frInviteNo {
+		if operation == FriendInviteReject {
 			typ = msgInviteRejected
 		}
 		m := note(other, typ)
@@ -220,7 +245,7 @@ func (c *Conn) friends(ctx context.Context, t Task) []byte {
 	default:
 		c.log.Info("friends task not implemented", "task", t.ID, "args", fields)
 		if t.ID == 16 || t.ID == 17 {
-			return ListReply(t, 0, nil)
+			return listReply(t, 0, nil)
 		}
 	}
 	return Reply(t, nil)

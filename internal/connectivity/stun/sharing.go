@@ -55,12 +55,36 @@ func (s *Server) peerRewriter() PeerRewriter {
 	}
 }
 
+// AddTransport attaches another SDK discovery version to the common traversal
+// and relay state. Both supported discovery versions use packed-v2 traversal.
+func (s *Server) AddTransport(version uint16) error {
+	if s.DiscoveryVersion < 1 || s.DiscoveryVersion > 2 || version < 1 || version > 2 {
+		return fmt.Errorf("shared transport requires supported SDK discovery versions")
+	}
+	if s.profiles[version] != nil && s.Mode == Relay {
+		return fmt.Errorf("discovery-only and SDK clients with version %d require direct or adaptive mode; relay mode advertises virtual addresses", version)
+	}
+	if s.transports == nil {
+		s.transports = map[uint16]bool{}
+	}
+	s.transports[version] = true
+	return nil
+}
+
+func (s *Server) sdkVersion(version uint16) bool {
+	return version == s.DiscoveryVersion || s.transports[version]
+}
+
 // AddDiscovery attaches a discovery-only game to these sockets before Run.
-// Its direct router has its own admission/peer state and no SDK relay allocator.
-// Wire versions must be distinct; DNS names are not present in UDP datagrams.
+// A distinct version keeps an independent direct router. If an SDK member uses
+// the same version, discovery must use their common real-address policy: there
+// is no title/domain identifier in these packets. Native gameplay stays separate.
 func (s *Server) AddDiscovery(version uint16, log *slog.Logger) error {
-	if s.DiscoveryVersion < 1 || s.DiscoveryVersion > 2 || version < 1 || version > 2 || version == s.DiscoveryVersion {
-		return fmt.Errorf("shared discovery requires distinct supported SDK wire versions")
+	if s.DiscoveryVersion < 1 || s.DiscoveryVersion > 2 || version < 1 || version > 2 {
+		return fmt.Errorf("shared discovery requires supported SDK wire versions")
+	}
+	if s.sdkVersion(version) && s.Mode == Relay {
+		return fmt.Errorf("discovery-only and SDK clients with version %d require direct or adaptive mode; relay mode advertises virtual addresses", version)
 	}
 	if s.profiles == nil {
 		s.profiles = map[uint16]*slog.Logger{}
@@ -74,6 +98,10 @@ func (s *Server) AddDiscovery(version uint16, log *slog.Logger) error {
 func (s *Server) initDiscovery() {
 	s.discovery = map[uint16]*Router{}
 	for version, log := range s.profiles {
+		if s.sdkVersion(version) {
+			log.Info("discovery uses shared SDK policy", "udp", []int{s.Port, s.AltPort}, "version", version, "mode", s.Mode)
+			continue
+		}
 		cfg := s.Config
 		cfg.Mode = Direct
 		cfg.RewritePeer = nil
