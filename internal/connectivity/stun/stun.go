@@ -26,8 +26,9 @@ const tickInterval = 100 * time.Millisecond
 // Server runs one title's Router on real sockets.
 type Server struct {
 	Config
-	Bind string
-	Log  *slog.Logger
+	Bind  string
+	Log   *slog.Logger
+	Games []string // configured SDK titles sharing this transport, not inferred from DNS
 	// DiscoveryVersion identifies the owning game's IP/NAT wire format when
 	// sharing is enabled. Unshared listeners keep their legacy version support.
 	DiscoveryVersion uint16
@@ -38,6 +39,7 @@ type Server struct {
 	discovery map[uint16]*Router
 	ports     [2]*net.UDPConn
 	relays    map[int]*net.UDPConn
+	rewriters map[string]PeerRewriter
 }
 
 // Run serves until ctx ends.
@@ -47,7 +49,9 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	s.relays = map[int]*net.UDPConn{}
-	s.router = NewRouter(s.Config, s.Log, s.allocate, s.release)
+	cfg := s.Config
+	cfg.RewritePeer = s.peerRewriter()
+	s.router = NewRouter(cfg, s.Log, s.allocate, s.release)
 	s.initDiscovery()
 	s.mu.Unlock()
 	for i, port := range []int{s.Port, s.AltPort} {
@@ -60,7 +64,7 @@ func (s *Server) Run(ctx context.Context) error {
 		s.ports[i] = c
 		s.mu.Unlock()
 	}
-	s.Log.Info("stun listening", "udp", []int{s.Port, s.AltPort}, "mode", s.Mode)
+	s.Log.Info("stun listening", "udp", []int{s.Port, s.AltPort}, "mode", s.Mode, "games", s.Games)
 
 	var wg sync.WaitGroup
 	for i, c := range s.ports {

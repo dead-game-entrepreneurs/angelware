@@ -51,6 +51,7 @@ const (
 	reqChangePassword = 0x02
 	reqDeleteAccount  = 0x06
 	reqAuthAccount    = 0x0A
+	reqAuthGuest      = 0x10
 	replyTicketKeyed  = 0x0B
 	replyTicketPlain  = 0x11
 )
@@ -77,6 +78,9 @@ type Service struct {
 	Sessions *session.Registry
 	Mode     Mode
 	Log      *slog.Logger
+	// AllowGuest enables the SDK's anonymous login protocol for this title only.
+	// Guest identities do not create or authenticate shared password accounts.
+	AllowGuest bool
 	// ObserveLogin records a successful login's public IV seed for the optional
 	// SvR relay rewriter. It must not block on key recovery.
 	ObserveLogin func(net.Addr, uint32)
@@ -92,7 +96,7 @@ func (s *Service) Serve(ctx context.Context, conn net.Conn, r *bufio.Reader, fir
 				"elapsed_ms", float64(time.Since(started).Microseconds())/1000)
 			return
 		} else {
-			if s.ObserveLogin != nil && f.Type == reqAuthAccount && !f.Encrypted && len(reply) >= 4 {
+			if s.ObserveLogin != nil && (f.Type == reqAuthAccount || f.Type == reqAuthGuest) && !f.Encrypted && len(reply) >= 4 {
 				response, rerr := bitbuf.NewReader(reply[4:])
 				request, qerr := bitbuf.NewReader(f.Payload)
 				if rerr == nil && qerr == nil {
@@ -139,6 +143,17 @@ func (s *Service) handle(ctx context.Context, log *slog.Logger, f frame.Frame) (
 	defer cancel()
 
 	switch f.Type {
+	case reqAuthGuest:
+		if !s.AllowGuest {
+			return status(replyTicketPlain, statusFailed), nil
+		}
+		if r.Typed || r.Remaining() > 7 {
+			return nil, errors.New("invalid anonymous login payload")
+		}
+		sess, ticket := s.Sessions.IssueGuest(s.Game, s.TitleID)
+		log.Info("guest login", "user", fmt.Sprintf("%016x", sess.UserID))
+		w := bitbuf.NewWriter(false).U32(statusOK).U32(0)
+		return frame.Plain(replyTicketPlain, w.Raw(ticketBlock(s.TitleID, sess.UserID, sess.Name, sess.Key)).Raw(ticket).Bytes()), nil
 	case reqCreateAccount:
 		return s.createAccount(ctx, log, seed, r)
 	case reqAuthAccount:

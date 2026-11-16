@@ -3,7 +3,9 @@
 Build and test the release before interrupting the running service. The legacy environment
 configuration still starts WWE and CoD BRO. Enabling OutRun requires the structured game
 configuration; see [network configuration](architecture.md#network-configuration) and the
-[OutRun patch setup](../patches/outrun2006/README.md).
+[OutRun patch setup](../patches/outrun2006/README.md). Family Feud also requires structured
+configuration. The [single-IP example](../configs/single-ip.example.json) shares its SDK
+transport with WWE; redirect both its four title-specific and four generic SDK DNS names.
 
 ## Upgrade an existing installation
 
@@ -33,11 +35,13 @@ scoped to `svr2007`. The upgrade does not import a development database or test 
 
 ## Rollback
 
-An old binary cannot use the migrated schema. Keep the matching database backup, image and
-configuration together. On a failed rollout, stop the new application, restore the complete
+An old binary cannot use a schema newer than it supports. Keep the matching database backup, image and
+configuration together. If the rollout changed the schema, stop the new application, restore the complete
 pre-upgrade database into a clean database, restore the saved configuration and run the saved
-image. Merely switching the image back is insufficient. Restore operations replace newer
-writes, so preserve an additional incident backup first if the new server accepted gameplay.
+image. Merely switching the image back is insufficient after a schema change. For a release
+that keeps the existing schema, restore its image and configuration without replacing current
+gameplay data. Restore operations replace newer writes, so preserve an additional incident
+backup first if the new server accepted gameplay.
 
 ## Diagnostics
 

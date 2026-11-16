@@ -45,7 +45,9 @@ func New(o game.Options) (game.Runtime, error) {
 	if settings.RelayRewrite && o.Connectivity != nil && o.Connectivity.Config.Mode != stun.Direct {
 		peers := svrpeer.New(o.Log, mm.RoomKey)
 		a.ObserveLogin = peers.ObserveLogin
-		o.Connectivity.Config.RewritePeer = peers.Rewrite
+		if err := o.Connectivity.RegisterPeerRewriter(Key, peers.Rewrite); err != nil {
+			return game.Runtime{}, err
+		}
 	}
 	if settings.Observer {
 		mm.ObserveConnectivity = func(e services.ConnectivityEvent) {
