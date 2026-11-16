@@ -132,8 +132,12 @@ For **World Series of Poker 2008: Battle for the Bracelets**:
 | --- | --- |
 | `wsop2008-ps2-auth.mmp3.demonware.net` | Sign-up and login |
 | `wsop2008-ps2-lsg.mmp3.demonware.net` | Lobby and matchmaking |
+| `stun.us.demonware.net` | Shared SDK discovery (US) |
+| `stun.eu.demonware.net` | Shared SDK discovery (Europe) |
+| `stun.jp.demonware.net` | Shared SDK discovery (Japan) |
+| `stun.au.demonware.net` | Shared SDK discovery (Australia) |
 
-Use the four generic SDK discovery names above as well. See [WSOP setup](#pcsx2-world-series-of-poker-2008) for account and invitation details.
+See [WSOP setup](#pcsx2-world-series-of-poker-2008) for account and invitation details.
 
 For **Call of Duty 2: Big Red One**:
 
