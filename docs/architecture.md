@@ -29,6 +29,13 @@ and completion callbacks keep WWE's two-player observer rules in its own package
 rewriter also lives there. On a shared SDK transport it checks its own room/key binding before
 changing traffic; another title's associations remain opaque.
 
+The TCP listener selects the legacy or MMP3 wire dialect using registered auth
+IDs or issued lobby tickets. Tickets bind both game and dialect. Framing,
+integrity checks, keepalives and task correlation belong to the protocol layer;
+game adapters select their dialect without adding game-name checks there.
+Notification codecs are selected per runtime and used consistently for pushes
+and mailbox fetches.
+
 Stats services own reads, writes, paging and deletion. Game codecs decode writes and encode rows,
 including wire integer types, extra columns and board ordering. Storage preserves integer
 columns and optional opaque extra data, such as OutRun's 64-bit ghost-file ID. Profile payloads

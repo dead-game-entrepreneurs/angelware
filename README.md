@@ -34,6 +34,10 @@ Supported games:
   with an optional PNACH relay for PCSX2 Sockets. See [PCSX2 connection options](#pcsx2-outrun-2006).
 - **Family Feud** (US PS2, `SLUS-214.46`, v1.02): guest login, matchmaking and two-player
   online games over direct P2P or the DemonWare relay. No PNACH required.
+- **World Series of Poker 2008: Battle for the Bracelets** (US PS2, `SLUS-216.86`):
+  experimental accounts, matchmaking, friends and leaderboards. Two unmodified PCSX2
+  Sockets clients completed games over direct P2P and forced relay. No PNACH required.
+  See [protocol notes](docs/games/wsop2008/analysis.md).
 - **Call of Duty 2: Big Red One** (US): NAT detection and connecting players, with an optional relay
   for players whose routers won't connect directly. Its lobby and matchmaking run on GameSpy
   (OpenSpy), not DemonWare, so angelware only replaces the DemonWare STUN part.
@@ -102,7 +106,7 @@ Point these names at the IP address of the machine running angelware (an `A` rec
 
 Also redirect the shared SDK discovery names: `stun.us.demonware.net`,
 `stun.eu.demonware.net`, `stun.jp.demonware.net`, `stun.au.demonware.net`.
-Family Feud uses these during startup, before contacting its title-specific login service.
+Family Feud and WSOP 2008 use these during startup, before title-specific login.
 
 For **OutRun 2006: Coast 2 Coast**:
 
@@ -121,6 +125,15 @@ For **Family Feud**:
 | `familyfeud.lsg.mmp.demonware.net` | Lobby and matchmaking |
 | `familyfeud.stun.us.demonware.net` | IP/NAT discovery and peer introductions |
 | `familyfeud.stun.eu.demonware.net` | IP/NAT discovery and peer introductions |
+
+For **World Series of Poker 2008: Battle for the Bracelets**:
+
+| Hostname | Used for |
+| --- | --- |
+| `wsop2008-ps2-auth.mmp3.demonware.net` | Sign-up and login |
+| `wsop2008-ps2-lsg.mmp3.demonware.net` | Lobby and matchmaking |
+
+Use the four generic SDK discovery names above as well. See [WSOP setup](#pcsx2-world-series-of-poker-2008) for account and invitation details.
 
 For **Call of Duty 2: Big Red One**:
 
@@ -150,6 +163,8 @@ address=/auth.outrun2.mmp.demonware.net/203.0.113.10
 address=/lsg.outrun2.mmp.demonware.net/203.0.113.10
 address=/outrun2.stun.us.demonware.net/203.0.113.10
 address=/outrun2.stun.eu.demonware.net/203.0.113.10
+address=/wsop2008-ps2-auth.mmp3.demonware.net/203.0.113.10
+address=/wsop2008-ps2-lsg.mmp3.demonware.net/203.0.113.10
 address=/familyfeud.auth.mmp.demonware.net/203.0.113.10
 address=/familyfeud.lsg.mmp.demonware.net/203.0.113.10
 address=/familyfeud.stun.us.demonware.net/203.0.113.10
@@ -212,6 +227,21 @@ Complete the switch within about **two minutes**, before the socket mappings exp
 still needs working direct connectivity and may need repeating after an emulator restart or
 an idle timeout. Use the PNACH relay when direct connections cannot get through the network.
 
+## PCSX2: World Series of Poker 2008
+
+Use the US disc (`SLUS-216.86`) with PCSX2 Sockets and the DNS redirects above.
+No PNACH is required. Accounts, unfiltered table browsing, friends, invitations,
+score-based leaderboards and offline-stat uploads are supported. Restrictive
+search filters remain unsupported. Use a lowercase username when sharing an
+account with older games.
+
+To accept a game invite, open Friends and select the inviting friend. Reopen
+that friend's options if they were already selected when the invite arrived;
+the shipped PS2 menu has no general invite popup.
+
+After a server restart, fully stop and boot both games without loading save
+states to refresh cached network discovery before testing joins.
+
 ## Running the server
 
 You need Docker with Compose.
@@ -258,7 +288,7 @@ routes OutRun's padded v1 discovery into its own direct router and WWE's packed 
 existing router. Their peer state, NAT policy and relay capacity remain separate. OutRun's
 optional native gameplay relay still uses UDP 3658; this does not enable adaptive OutRun gameplay.
 
-Family Feud can join WWE's packed-v2 SDK transport with
+Family Feud and WSOP 2008 can join WWE's packed-v2 SDK transport with
 `"stun": { "share_transport_with": "svr2007" }` and matching bind/public addresses.
 This shares discovery, traversal, relay capacity and the owner's routing policy. Auth, rooms and
 lobby handlers remain separate; WWE's peer hook only rewrites packets bound to WWE room keys.

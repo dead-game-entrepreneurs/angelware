@@ -55,7 +55,8 @@ const (
 	msgFriendOffline  = 10
 )
 
-func messageFields(m store.Message) []bitbuf.Field {
+// DefaultMessageFields encodes notifications for the original supported SDK.
+func DefaultMessageFields(m store.Message) []bitbuf.Field {
 	f := []bitbuf.Field{
 		bitbuf.Int(bitbuf.U32, uint64(m.Type)),
 		bitbuf.Int(bitbuf.U64, uint64(m.Created.Unix())),
@@ -96,9 +97,11 @@ func truncateBytes(b []byte, n int) []byte {
 	return b
 }
 
-// pushPayload is a gateway message 2: one typed message, no envelope (0x6ad48).
-func pushPayload(m store.Message) []byte {
-	return bitbuf.NewWriter(true).Fields(messageFields(m)).Bytes()
+func (s *Server) messageFields(m store.Message) []bitbuf.Field {
+	if s.MessageFields != nil {
+		return s.MessageFields(m)
+	}
+	return DefaultMessageFields(m)
 }
 
 var timeNow = time.Now
@@ -135,14 +138,39 @@ func (c *Conn) mailbox(ctx context.Context, t Task) []byte {
 		if err != nil {
 			c.log.Error("load mailbox", "err", err)
 		}
-		var out []bitbuf.Field
+		// Older servers left proposal notifications behind after acceptance.
+		// Resolve those on fetch too, so they cannot repopulate the game's UI.
+		var requests map[uint64]bool
 		for _, m := range msgs {
-			out = append(out, messageFields(m)...)
+			if m.Type == msgFriendRequest {
+				pending, err := c.srv.Store.FriendRequestsTo(ctx, c.sess.UserID)
+				if err != nil {
+					c.log.Error("load pending requests for mailbox", "err", err)
+					return ErrorReply(t, 1)
+				}
+				requests = make(map[uint64]bool, len(pending))
+				for _, request := range pending {
+					requests[request.UserID] = true
+				}
+				break
+			}
 		}
-		if len(msgs) > 0 {
-			c.log.Info("mailbox delivered", "messages", len(msgs))
+		var out []bitbuf.Field
+		var delivered uint32
+		for _, m := range msgs {
+			if m.Type == msgFriendRequest && !requests[m.From] {
+				if err := c.srv.Store.ClearMessages(ctx, c.sess.UserID, m.From, msgFriendRequest); err != nil {
+					c.log.Error("clear resolved proposal notification", "err", err)
+				}
+				continue
+			}
+			out = append(out, c.srv.messageFields(m)...)
+			delivered++
 		}
-		return ListReply(t, uint32(len(msgs)), out)
+		if delivered > 0 {
+			c.log.Info("mailbox delivered", "messages", delivered)
+		}
+		return ListReply(t, delivered, out)
 	case mbAck:
 		if len(args) >= 1 {
 			if err := c.srv.Store.Ack(ctx, c.sess.UserID, args[0].Int); err != nil {

@@ -74,6 +74,7 @@ const (
 type Service struct {
 	Game     string
 	TitleID  uint32
+	Protocol frame.Protocol
 	Store    store.Store
 	Sessions *session.Registry
 	Mode     Mode
@@ -81,6 +82,9 @@ type Service struct {
 	// AllowGuest enables the SDK's anonymous login protocol for this title only.
 	// Guest identities do not create or authenticate shared password accounts.
 	AllowGuest bool
+	// NameID matches the title SDK's account-name hashing rule at signup.
+	// The default is Tiger(name); some newer SDKs hash lowercase names.
+	NameID func([]byte) uint64
 	// ObserveLogin records a successful login's public IV seed for the optional
 	// SvR relay rewriter. It must not block on key recovery.
 	ObserveLogin func(net.Addr, uint32)
@@ -91,13 +95,17 @@ func (s *Service) Serve(ctx context.Context, conn net.Conn, r *bufio.Reader, fir
 	log := s.Log.With("peer", conn.RemoteAddr().String())
 	for f := first; ; {
 		started := time.Now()
-		if reply, err := s.handle(ctx, log, f); err != nil {
+		if f.KeepAlive {
+			if _, err := conn.Write(make([]byte, s.Protocol.HeaderSize())); err != nil {
+				return
+			}
+		} else if reply, err := s.handle(ctx, log, f); err != nil {
 			log.Warn("auth request failed", "type", f.Type, "err", err,
 				"elapsed_ms", float64(time.Since(started).Microseconds())/1000)
 			return
 		} else {
-			if s.ObserveLogin != nil && (f.Type == reqAuthAccount || f.Type == reqAuthGuest) && !f.Encrypted && len(reply) >= 4 {
-				response, rerr := bitbuf.NewReader(reply[4:])
+			if s.ObserveLogin != nil && (f.Type == reqAuthAccount || f.Type == reqAuthGuest) && !f.Encrypted && len(reply.Payload) > 0 {
+				response, rerr := bitbuf.NewReader(reply.Payload)
 				request, qerr := bitbuf.NewReader(f.Payload)
 				if rerr == nil && qerr == nil {
 					code, e := response.U32()
@@ -108,7 +116,7 @@ func (s *Service) Serve(ctx context.Context, conn net.Conn, r *bufio.Reader, fir
 				}
 			}
 			writeStarted := time.Now()
-			n, err := conn.Write(reply)
+			n, err := conn.Write(s.Protocol.Plain(reply.Type, reply.Payload))
 			log.Debug("auth response sent", "type", f.Type, "bytes", n,
 				"elapsed_ms", float64(time.Since(started).Microseconds())/1000,
 				"write_ms", float64(time.Since(writeStarted).Microseconds())/1000, "err", err)
@@ -117,27 +125,30 @@ func (s *Service) Serve(ctx context.Context, conn net.Conn, r *bufio.Reader, fir
 			}
 		}
 		var err error
-		if f, err = frame.Read(r); err != nil {
+		if f, err = s.Protocol.Read(r); err != nil {
 			return
 		}
 	}
 }
 
-func (s *Service) handle(ctx context.Context, log *slog.Logger, f frame.Frame) ([]byte, error) {
+func (s *Service) handle(ctx context.Context, log *slog.Logger, f frame.Frame) (frame.Frame, error) {
+	if f.Protocol != s.Protocol {
+		return frame.Frame{}, errors.New("auth wire protocol mismatch")
+	}
 	if f.Encrypted {
-		return nil, errors.New("encrypted auth request")
+		return frame.Frame{}, errors.New("encrypted auth request")
 	}
 	r, err := bitbuf.NewReader(f.Payload)
 	if err != nil {
-		return nil, err
+		return frame.Frame{}, err
 	}
 	seed, _ := r.U32()
 	title, err := r.U32()
 	if err != nil {
-		return nil, err
+		return frame.Frame{}, err
 	}
 	if title != s.TitleID {
-		return nil, fmt.Errorf("unexpected title id %d", title)
+		return frame.Frame{}, fmt.Errorf("unexpected title id %d", title)
 	}
 	ctx, cancel := context.WithTimeout(ctx, store.Timeout)
 	defer cancel()
@@ -148,18 +159,18 @@ func (s *Service) handle(ctx context.Context, log *slog.Logger, f frame.Frame) (
 			return status(replyTicketPlain, statusFailed), nil
 		}
 		if r.Typed || r.Remaining() > 7 {
-			return nil, errors.New("invalid anonymous login payload")
+			return frame.Frame{}, errors.New("invalid anonymous login payload")
 		}
-		sess, ticket := s.Sessions.IssueGuest(s.Game, s.TitleID)
+		sess, ticket := s.Sessions.IssueGuest(s.Game, s.TitleID, s.Protocol)
 		log.Info("guest login", "user", fmt.Sprintf("%016x", sess.UserID))
 		w := bitbuf.NewWriter(false).U32(statusOK).U32(0)
-		return frame.Plain(replyTicketPlain, w.Raw(ticketBlock(s.TitleID, sess.UserID, sess.Name, sess.Key)).Raw(ticket).Bytes()), nil
+		return frame.Frame{Type: replyTicketPlain, Payload: w.Raw(ticketBlock(s.TitleID, sess.UserID, sess.Name, sess.Key)).Raw(ticket).Bytes()}, nil
 	case reqCreateAccount:
 		return s.createAccount(ctx, log, seed, r)
 	case reqAuthAccount:
 		raw, err := r.Raw(8)
 		if err != nil {
-			return nil, err
+			return frame.Frame{}, err
 		}
 		return s.login(ctx, log, binary.LittleEndian.Uint64(raw))
 	case reqChangePassword, reqDeleteAccount:
@@ -170,16 +181,16 @@ func (s *Service) handle(ctx context.Context, log *slog.Logger, f frame.Frame) (
 	}
 }
 
-func (s *Service) createAccount(ctx context.Context, log *slog.Logger, seed uint32, r *bitbuf.Reader) ([]byte, error) {
-	reply := func(code uint32) ([]byte, error) { return status(reqCreateAccount+1, code), nil }
+func (s *Service) createAccount(ctx context.Context, log *slog.Logger, seed uint32, r *bitbuf.Reader) (frame.Frame, error) {
+	reply := func(code uint32) (frame.Frame, error) { return status(reqCreateAccount+1, code), nil }
 	r.Raw(8) // id, zero at signup
 	enc, err := r.Raw(0x60)
 	if err != nil {
-		return nil, err
+		return frame.Frame{}, err
 	}
 	block, err := dwcrypto.Decrypt(signupKey, dwcrypto.SeedIV(seed), enc)
 	if err != nil {
-		return nil, err
+		return frame.Frame{}, err
 	}
 	if !bytes.Equal(block[:4], ticketMagic) {
 		log.Warn("signup block did not decrypt")
@@ -192,14 +203,18 @@ func (s *Service) createAccount(ctx context.Context, log *slog.Logger, seed uint
 	if len(name) == 0 {
 		return reply(statusFailed)
 	}
-	acct := store.Account{UserID: dwcrypto.UserID(name), Name: string(name),
+	nameID := s.NameID
+	if nameID == nil {
+		nameID = dwcrypto.UserID
+	}
+	acct := store.Account{UserID: nameID(name), Name: string(name),
 		PasswordTiger: bytes.Clone(block[68:92])}
 	switch err := s.Store.CreateAccount(ctx, acct); {
 	case errors.Is(err, store.ErrExists):
 		log.Info("signup for existing name", "name", acct.Name, "status", statusUsernameExists)
 		return reply(statusUsernameExists)
 	case err != nil:
-		return nil, err
+		return frame.Frame{}, err
 	}
 	log.Info("account created", "name", acct.Name, "user", fmt.Sprintf("%016x", acct.UserID))
 	return reply(statusOK)
@@ -208,11 +223,11 @@ func (s *Service) createAccount(ctx context.Context, log *slog.Logger, seed uint
 // accountChange handles change password and delete account: both prove the
 // current password by encrypting a block with it.
 func (s *Service) accountChange(ctx context.Context, log *slog.Logger, msgType uint8, seed uint32,
-	r *bitbuf.Reader) ([]byte, error) {
-	reply := func(code uint32) ([]byte, error) { return status(msgType+1, code), nil }
+	r *bitbuf.Reader) (frame.Frame, error) {
+	reply := func(code uint32) (frame.Frame, error) { return status(msgType+1, code), nil }
 	raw, err := r.Raw(8)
 	if err != nil {
-		return nil, err
+		return frame.Frame{}, err
 	}
 	size := 0x20
 	if msgType == reqDeleteAccount {
@@ -220,7 +235,7 @@ func (s *Service) accountChange(ctx context.Context, log *slog.Logger, msgType u
 	}
 	enc, err := r.Raw(size)
 	if err != nil {
-		return nil, err
+		return frame.Frame{}, err
 	}
 	userID := binary.LittleEndian.Uint64(raw)
 	acct, err := s.Store.Account(ctx, userID)
@@ -235,23 +250,23 @@ func (s *Service) accountChange(ctx context.Context, log *slog.Logger, msgType u
 	}
 	if msgType == reqChangePassword {
 		if err := s.Store.SetPassword(ctx, userID, bytes.Clone(block[4:28])); err != nil {
-			return nil, err
+			return frame.Frame{}, err
 		}
 		log.Info("password changed", "name", acct.Name)
 		return reply(statusOK)
 	}
 	if err := s.Store.DeleteAccount(ctx, userID); err != nil {
-		return nil, err
+		return frame.Frame{}, err
 	}
 	log.Info("account deleted", "name", acct.Name, "user", fmt.Sprintf("%016x", userID))
 	return reply(statusOK)
 }
 
-func status(msgType uint8, code uint32) []byte {
-	return frame.Plain(msgType, bitbuf.NewWriter(false).U32(code).Bytes())
+func status(msgType uint8, code uint32) frame.Frame {
+	return frame.Frame{Type: msgType, Payload: bitbuf.NewWriter(false).U32(code).Bytes()}
 }
 
-func (s *Service) login(ctx context.Context, log *slog.Logger, userID uint64) ([]byte, error) {
+func (s *Service) login(ctx context.Context, log *slog.Logger, userID uint64) (frame.Frame, error) {
 	name := ""
 	var key []byte
 	acct, err := s.Store.Account(ctx, userID)
@@ -263,10 +278,10 @@ func (s *Service) login(ctx context.Context, log *slog.Logger, userID uint64) ([
 		log.Info("login for unknown account", "user", fmt.Sprintf("%016x", userID))
 		return status(replyTicketKeyed, statusFailed), nil
 	default:
-		return nil, err
+		return frame.Frame{}, err
 	}
 
-	sess, ticket := s.Sessions.Issue(s.Game, s.TitleID, userID, name)
+	sess, ticket := s.Sessions.Issue(s.Game, s.TitleID, userID, name, s.Protocol)
 	block := ticketBlock(s.TitleID, userID, name, sess.Key)
 	w := bitbuf.NewWriter(false).U32(statusOK)
 	msgType := uint8(replyTicketPlain)
@@ -275,7 +290,7 @@ func (s *Service) login(ctx context.Context, log *slog.Logger, userID uint64) ([
 		rand.Read(seed[:])
 		enc, err := dwcrypto.Encrypt(key, dwcrypto.SeedIV(binary.LittleEndian.Uint32(seed[:])), block)
 		if err != nil {
-			return nil, err
+			return frame.Frame{}, err
 		}
 		w.U32(binary.LittleEndian.Uint32(seed[:]))
 		block, msgType = enc, replyTicketKeyed
@@ -288,7 +303,7 @@ func (s *Service) login(ctx context.Context, log *slog.Logger, userID uint64) ([
 		}
 	}
 	log.Info("login", "user", fmt.Sprintf("%016x", userID), "name", name, "mode", s.Mode)
-	return frame.Plain(msgType, w.Raw(block).Raw(ticket).Bytes()), nil
+	return frame.Frame{Type: msgType, Payload: w.Raw(block).Raw(ticket).Bytes()}, nil
 }
 
 // ticketBlock builds the 0x80-byte block parsed at LBYM 0x75020, packed without

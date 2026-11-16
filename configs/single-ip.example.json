@@ -23,6 +23,12 @@
       "stun": { "share_transport_with": "svr2007" }
     },
     {
+      "game": "wsop2008",
+      "bind": "203.0.113.10",
+      "public_ip": "203.0.113.10",
+      "stun": { "share_transport_with": "svr2007" }
+    },
+    {
       "game": "codbro",
       "bind": "203.0.113.10",
       "public_ip": "203.0.113.10",

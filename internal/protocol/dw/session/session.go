@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/princebyyourlogic/angelware/internal/protocol/dw/frame"
 )
 
 const (
@@ -19,14 +21,15 @@ const (
 var ticketMagic = [4]byte{'A', 'N', 'G', 'L'}
 
 type Session struct {
-	Token   [16]byte
-	Game    string
-	TitleID uint32
-	UserID  uint64
-	Name    string
-	Key     []byte
-	Guest   bool // temporary identity, never a password account
-	expires time.Time
+	Token    [16]byte
+	Game     string
+	TitleID  uint32
+	Protocol frame.Protocol
+	UserID   uint64
+	Name     string
+	Key      []byte
+	Guest    bool // temporary identity, never a password account
+	expires  time.Time
 }
 
 type Registry struct {
@@ -37,25 +40,25 @@ type Registry struct {
 func NewRegistry() *Registry { return &Registry{sessions: map[[16]byte]Session{}} }
 
 // Issue creates a session and returns its opaque lobby ticket.
-func (r *Registry) Issue(game string, title uint32, userID uint64, name string) (Session, []byte) {
-	return r.issue(game, title, userID, name, false)
+func (r *Registry) Issue(game string, title uint32, userID uint64, name string, protocol frame.Protocol) (Session, []byte) {
+	return r.issue(game, title, userID, name, false, protocol)
 }
 
 // IssueGuest creates a fresh identity for an anonymous title login. Neither the
 // request seed nor the client's IP is a persistent account identifier.
-func (r *Registry) IssueGuest(game string, title uint32) (Session, []byte) {
+func (r *Registry) IssueGuest(game string, title uint32, protocol frame.Protocol) (Session, []byte) {
 	var id [8]byte
 	for binary.LittleEndian.Uint64(id[:]) == 0 {
 		rand.Read(id[:])
 	}
 	user := binary.LittleEndian.Uint64(id[:])
-	return r.issue(game, title, user, fmt.Sprintf("Guest%08x", uint32(user)), true)
+	return r.issue(game, title, user, fmt.Sprintf("Guest%08x", uint32(user)), true, protocol)
 }
 
-func (r *Registry) issue(game string, title uint32, userID uint64, name string, guest bool) (Session, []byte) {
+func (r *Registry) issue(game string, title uint32, userID uint64, name string, guest bool, protocol frame.Protocol) (Session, []byte) {
 	var token [16]byte
 	rand.Read(token[:])
-	s := Session{Token: token, Game: game, TitleID: title, UserID: userID, Name: name, Key: make([]byte, KeySize), Guest: guest, expires: time.Now().Add(ttl)}
+	s := Session{Token: token, Game: game, Protocol: protocol, TitleID: title, UserID: userID, Name: name, Key: make([]byte, KeySize), Guest: guest, expires: time.Now().Add(ttl)}
 	rand.Read(s.Key)
 
 	ticket := make([]byte, TicketSize)
