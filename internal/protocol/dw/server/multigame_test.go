@@ -14,6 +14,7 @@ import (
 	"github.com/princebyyourlogic/angelware/internal/games/familyfeud"
 	"github.com/princebyyourlogic/angelware/internal/games/outrun2006"
 	"github.com/princebyyourlogic/angelware/internal/games/svr2007"
+	"github.com/princebyyourlogic/angelware/internal/games/wsop2008"
 	"github.com/princebyyourlogic/angelware/internal/protocol/dw/auth"
 	"github.com/princebyyourlogic/angelware/internal/protocol/dw/bitbuf"
 	"github.com/princebyyourlogic/angelware/internal/protocol/dw/frame"
@@ -28,7 +29,7 @@ func multiTCP(t *testing.T) (*TCP, *store.MemoryDB) {
 	sessions := session.NewRegistry()
 	db := store.NewMemoryDB()
 	tcp := &TCP{Auth: map[uint32]*auth.Service{}, Lobby: &gateway.Server{Sessions: sessions, Applications: map[string]gateway.Application{}, Log: log}, Log: log}
-	for _, d := range []game.Definition{svr2007.Definition(), outrun2006.Definition(), familyfeud.Definition()} {
+	for _, d := range []game.Definition{svr2007.Definition(), outrun2006.Definition(), familyfeud.Definition(), wsop2008.Definition()} {
 		r, err := d.New(game.Options{Store: db.ForGame(d.Key), Sessions: sessions, AuthMode: auth.Verify, Log: log})
 		if err != nil {
 			t.Fatal(err)

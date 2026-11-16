@@ -4,8 +4,11 @@ Build and test the release before interrupting the running service. The legacy e
 configuration still starts WWE and CoD BRO. Enabling OutRun requires the structured game
 configuration; see [network configuration](architecture.md#network-configuration) and the
 [OutRun patch setup](../patches/outrun2006/README.md). Family Feud also requires structured
-configuration. The [single-IP example](../configs/single-ip.example.json) shares its SDK
-transport with WWE; redirect both its four title-specific and four generic SDK DNS names.
+configuration. WSOP 2008 uses structured configuration as well. The
+[single-IP example](../configs/single-ip.example.json) shares both games' SDK transport
+with WWE. Redirect Family Feud's four title-specific names, WSOP's two MMP3 names,
+and the four generic SDK discovery names listed in the README. WSOP adds no new
+listening ports or database migrations.
 
 ## Upgrade an existing installation
 

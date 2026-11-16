@@ -33,6 +33,8 @@ type Social interface {
 	Enqueue(ctx context.Context, m Message) (uint64, error)
 	Inbox(ctx context.Context, user uint64, offset, limit int) ([]Message, error)
 	Ack(ctx context.Context, user, messageID uint64) error
+	// ClearMessages resolves pending notifications of one type from one sender.
+	ClearMessages(ctx context.Context, to, from uint64, typ uint32) error
 
 	// AddFriendRequest reports whether the request is new (a repeat is not stored twice).
 	AddFriendRequest(ctx context.Context, from, to uint64, data []byte) (bool, error)
@@ -98,6 +100,17 @@ func (m *Memory) Ack(_ context.Context, user, id uint64) error {
 	defer m.s.mu.Unlock()
 	if msg, ok := m.s.mail[id]; ok && msg.To == user {
 		delete(m.s.mail, id)
+	}
+	return nil
+}
+
+func (m *Memory) ClearMessages(_ context.Context, to, from uint64, typ uint32) error {
+	m.s.mu.Lock()
+	defer m.s.mu.Unlock()
+	for id, msg := range m.s.mail {
+		if msg.To == to && msg.From == from && msg.Type == typ {
+			delete(m.s.mail, id)
+		}
 	}
 	return nil
 }
@@ -239,6 +252,12 @@ func (p *Postgres) Inbox(ctx context.Context, user uint64, offset, limit int) ([
 
 func (p *Postgres) Ack(ctx context.Context, user, id uint64) error {
 	_, err := p.pool.Exec(ctx, `DELETE FROM mailbox WHERE game_id = $3 AND id = $1 AND to_id = $2`, int64(id), int64(user), p.game)
+	return err
+}
+
+func (p *Postgres) ClearMessages(ctx context.Context, to, from uint64, typ uint32) error {
+	_, err := p.pool.Exec(ctx, `DELETE FROM mailbox WHERE game_id = $4 AND to_id = $1 AND from_id = $2 AND type = $3`,
+		int64(to), int64(from), int64(typ), p.game)
 	return err
 }
 

@@ -9,6 +9,8 @@
 // Task replies (docs/games/svr2007/services.md): u8 slot, u8 seq, u32 error, u8 task id
 // (echoed; each service's parser only accepts its own result-bearing ids), then
 // u32 count and results for tasks that return lists.
+// MMP3 omits slot/seq from requests and replaces them in replies with a typed u64
+// transaction ID. Its SDK consumes the pending task queue in FIFO order.
 package gateway
 
 import (
@@ -54,13 +56,15 @@ type Server struct {
 
 // Conn is one client's gateway connection.
 type Conn struct {
-	srv     *Server
-	conn    net.Conn
-	log     *slog.Logger
-	sess    session.Session
-	handler Handler
-	out     chan outbound // frames for the writer goroutine
-	done    chan struct{}
+	srv         *Server
+	conn        net.Conn
+	log         *slog.Logger
+	sess        session.Session
+	handler     Handler
+	out         chan outbound // frames for the writer goroutine
+	done        chan struct{}
+	protocol    frame.Protocol
+	transaction uint64
 }
 
 type outbound struct {
@@ -77,12 +81,14 @@ const outQueue = 64
 type Task struct {
 	Service, Slot, Seq, ID uint8
 	Args                   *bitbuf.Reader
+	Protocol               frame.Protocol
+	Transaction            uint64
 }
 
 // Serve runs a gateway connection that opened with hello.
 func (s *Server) Serve(ctx context.Context, nc net.Conn, r *bufio.Reader, hello frame.Frame) {
 	c := &Conn{srv: s, conn: nc, log: s.Log.With("peer", nc.RemoteAddr().String()),
-		out: make(chan outbound, outQueue), done: make(chan struct{})}
+		out: make(chan outbound, outQueue), done: make(chan struct{}), protocol: hello.Protocol}
 	go c.writer()
 	defer close(c.done)
 	if err := c.hello(hello); err != nil {
@@ -97,7 +103,7 @@ func (s *Server) Serve(ctx context.Context, nc net.Conn, r *bufio.Reader, hello 
 	c.handler = app.Open(ctx, c)
 	defer c.handler.Close(context.WithoutCancel(ctx))
 	for {
-		f, err := frame.Read(r)
+		f, err := c.protocol.Read(r)
 		if err != nil {
 			c.log.Info("gateway closed", "err", err)
 			return
@@ -120,7 +126,7 @@ func (c *Conn) hello(f frame.Frame) error {
 		return err
 	}
 	sess, ok := c.srv.Sessions.Redeem(ticket)
-	if !ok {
+	if !ok || sess.Protocol != f.Protocol {
 		return fmt.Errorf("unknown or expired ticket")
 	}
 	c.sess = sess
@@ -131,6 +137,13 @@ func (c *Conn) hello(f frame.Frame) error {
 
 func (c *Conn) handle(ctx context.Context, f frame.Frame) error {
 	started := time.Now()
+	if f.KeepAlive {
+		// SDK 1.80 sends a raw zero u32 after 40s without outgoing data;
+		// receiving any bytes resets its 80s receive watchdog (0x3396f0).
+		// Echo without creating a task or disturbing transaction correlation.
+		c.log.Debug("gateway keepalive")
+		return c.enqueue(outbound{frame: make([]byte, c.protocol.HeaderSize())})
+	}
 	if !f.Encrypted {
 		c.log.Debug("plain gateway message ignored", "type", f.Type)
 		return nil
@@ -139,7 +152,7 @@ func (c *Conn) handle(ctx context.Context, f frame.Frame) error {
 	if err != nil {
 		return err
 	}
-	service, payload, err := frame.Open(plain)
+	service, payload, err := c.protocol.OpenClient(plain, c.sess.Key)
 	if err != nil {
 		return err
 	}
@@ -147,11 +160,15 @@ func (c *Conn) handle(ctx context.Context, f frame.Frame) error {
 	if err != nil {
 		return err
 	}
-	t := Task{Service: service, Args: r}
-	if t.Slot, err = r.U8(); err == nil {
-		if t.Seq, err = r.U8(); err == nil {
-			t.ID, err = r.U8()
+	c.transaction++
+	t := Task{Service: service, Args: r, Protocol: c.protocol, Transaction: c.transaction}
+	if c.protocol == frame.Legacy {
+		if t.Slot, err = r.U8(); err == nil {
+			t.Seq, err = r.U8()
 		}
+	}
+	if err == nil {
+		t.ID, err = r.U8()
 	}
 	if err != nil {
 		return fmt.Errorf("task header: %w", err)
@@ -163,7 +180,7 @@ func (c *Conn) handle(ctx context.Context, f frame.Frame) error {
 	defer cancel()
 	reply := c.handler.Handle(ctx, t)
 	correlation := Task{Service: t.Service, Slot: t.Slot, Seq: t.Seq, ID: t.ID}
-	err = c.enqueue(outbound{frame: frame.Plain(msgTaskReply, reply), task: &correlation})
+	err = c.enqueue(outbound{frame: c.protocol.Plain(msgTaskReply, reply), task: &correlation})
 	c.log.Debug("task replied", "service", t.Service, "task", t.ID, "slot", t.Slot, "seq", t.Seq,
 		"elapsed_ms", float64(time.Since(started).Microseconds())/1000,
 		"reply_bytes", len(reply), "queue_depth", len(c.out), "err", err)
@@ -172,7 +189,7 @@ func (c *Conn) handle(ctx context.Context, f frame.Frame) error {
 
 // send queues a frame, waiting for room (task replies must not be lost).
 func (c *Conn) Send(msgType uint8, payload []byte) error {
-	return c.enqueue(outbound{frame: frame.Plain(msgType, payload)})
+	return c.enqueue(outbound{frame: c.protocol.Plain(msgType, payload)})
 }
 
 func (c *Conn) enqueue(b outbound) error {
@@ -188,7 +205,7 @@ func (c *Conn) enqueue(b outbound) error {
 // trySend queues a frame only if there is room right away.
 func (c *Conn) TrySend(msgType uint8, payload []byte) bool {
 	select {
-	case c.out <- outbound{frame: frame.Plain(msgType, payload), queued: time.Now()}:
+	case c.out <- outbound{frame: c.protocol.Plain(msgType, payload), queued: time.Now()}:
 		return true
 	default:
 		return false
@@ -201,7 +218,11 @@ func (c *Conn) writer() {
 		case b := <-c.out:
 			started := time.Now()
 			n, err := c.conn.Write(b.frame)
-			attrs := []any{"type", b.frame[3], "bytes", n,
+			var kind any = "keepalive"
+			if len(b.frame) > c.protocol.HeaderSize()+1 {
+				kind = b.frame[c.protocol.HeaderSize()+1]
+			}
+			attrs := []any{"type", kind, "bytes", n,
 				"queue_ms", float64(started.Sub(b.queued).Microseconds()) / 1000,
 				"write_ms", float64(time.Since(started).Microseconds()) / 1000, "err", err}
 			if b.task != nil {
@@ -221,17 +242,25 @@ func (c *Conn) writer() {
 // Reply is a task result without a list: u32 error 0, u8 task id, then fields
 // (a single result object, e.g. a profile).
 func Reply(t Task, fields []bitbuf.Field) []byte {
-	return bitbuf.NewWriter(true).U8(t.Slot).U8(t.Seq).U32(0).U8(t.ID).Fields(fields).Bytes()
+	return replyHeader(t).U32(0).U8(t.ID).Fields(fields).Bytes()
 }
 
 // ErrorReply fails a task: the client reads the non-zero error and nothing after it.
 func ErrorReply(t Task, code uint32) []byte {
-	return bitbuf.NewWriter(true).U8(t.Slot).U8(t.Seq).U32(code).Bytes()
+	return replyHeader(t).U32(code).Bytes()
 }
 
 // ListReply is a task result carrying count items (fields holds all of them).
 func ListReply(t Task, count uint32, fields []bitbuf.Field) []byte {
-	return bitbuf.NewWriter(true).U8(t.Slot).U8(t.Seq).U32(0).U8(t.ID).U32(count).Fields(fields).Bytes()
+	return replyHeader(t).U32(0).U8(t.ID).U32(count).Fields(fields).Bytes()
+}
+
+func replyHeader(t Task) *bitbuf.Writer {
+	w := bitbuf.NewWriter(true)
+	if t.Protocol == frame.MMP3 {
+		return w.Field(bitbuf.Int(bitbuf.U64, t.Transaction))
+	}
+	return w.U8(t.Slot).U8(t.Seq)
 }
 
 // UserID is the connection's user.

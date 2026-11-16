@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 
 	"github.com/princebyyourlogic/angelware/internal/protocol/dw/bitbuf"
@@ -49,7 +50,8 @@ const (
 // invite remembers the session of a sent invite so the answer can carry it back
 // to the inviter.
 type invite struct {
-	session []byte
+	session  []byte
+	answered bool
 }
 
 // firstBlob returns the first blob among a task's arguments.
@@ -84,6 +86,9 @@ func (c *Conn) friends(ctx context.Context, t Task) []byte {
 			c.log.Error(what, "err", err)
 		}
 	}
+	clear := func(from, to uint64, typ uint32) {
+		fail("resolve pending notification", st.ClearMessages(ctx, to, from, typ))
+	}
 
 	switch t.ID {
 	case frPropose:
@@ -97,10 +102,15 @@ func (c *Conn) friends(ctx context.Context, t Task) []byte {
 		if already, err := st.AreFriends(ctx, me, other); already || err != nil {
 			fail("check friendship", err)
 			c.log.Info("friend request between existing friends ignored")
+			if already {
+				clear(me, other, msgFriendRequest)
+				clear(other, me, msgFriendRequest)
+			}
 			return Reply(t, nil)
 		}
 		// They already asked us: treat our request as accepting theirs.
 		if crossed, err := st.RemoveFriendRequest(ctx, other, me); crossed {
+			clear(other, me, msgFriendRequest)
 			fail("save friendship", st.AddFriendship(ctx, me, other))
 			c.srv.Notify(ctx, note(other, msgFriendAccepted))
 			c.log.Info("crossed friend requests: now friends")
@@ -118,12 +128,14 @@ func (c *Conn) friends(ctx context.Context, t Task) []byte {
 			c.log.Info("repeated friend request not sent again")
 		}
 	case frWithdraw:
+		clear(me, other, msgFriendRequest)
 		if ok, err := st.RemoveFriendRequest(ctx, me, other); ok {
 			c.srv.Notify(ctx, note(other, msgFriendCanceled))
 		} else {
 			fail("withdraw friend request", err)
 		}
 	case frAccept:
+		clear(other, me, msgFriendRequest)
 		ok, err := st.RemoveFriendRequest(ctx, other, me)
 		fail("accept friend request", err)
 		if ok {
@@ -131,6 +143,7 @@ func (c *Conn) friends(ctx context.Context, t Task) []byte {
 			c.srv.Notify(ctx, note(other, msgFriendAccepted))
 		}
 	case frReject:
+		clear(other, me, msgFriendRequest)
 		if ok, err := st.RemoveFriendRequest(ctx, other, me); ok {
 			c.srv.Notify(ctx, note(other, msgFriendRejected))
 		} else {
@@ -180,16 +193,23 @@ func (c *Conn) friends(ctx context.Context, t Task) []byte {
 		m.Data = firstBlob(args)
 		c.srv.Notify(ctx, m)
 	case frInvite:
-		if blocked, _ := st.IsBlocked(ctx, other, me); blocked || other == 0 {
+		if blocked, err := st.IsBlocked(ctx, other, me); blocked || err != nil || other == 0 || other == me {
 			return Reply(t, nil)
 		}
 		inv := invite{session: firstBlob(args)}
-		c.srv.setInvite(me, other, inv)
+		if len(inv.session) != 8 || !c.srv.setInvite(me, other, inv) {
+			return Reply(t, nil)
+		}
+		clear(me, other, msgInvite)
 		m := note(other, msgInvite)
 		m.Data = inv.session
 		c.srv.Notify(ctx, m)
 	case frInviteOK, frInviteNo:
-		inv := c.srv.takeInvite(other, me)
+		clear(other, me, msgInvite)
+		inv, pending := c.srv.takeInvite(other, me)
+		if !pending {
+			return Reply(t, nil)
+		}
 		typ := uint32(msgInviteAccepted)
 		if t.ID == frInviteNo {
 			typ = msgInviteRejected
@@ -206,19 +226,29 @@ func (c *Conn) friends(ctx context.Context, t Task) []byte {
 	return Reply(t, nil)
 }
 
-func (s *Server) setInvite(from, to uint64, inv invite) {
+func (s *Server) setInvite(from, to uint64, inv invite) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.invites == nil {
 		s.invites = map[[2]uint64]invite{}
 	}
+	if previous, ok := s.invites[[2]uint64{from, to}]; ok && bytes.Equal(previous.session, inv.session) {
+		return false
+	}
+	inv.session = bytes.Clone(inv.session)
 	s.invites[[2]uint64{from, to}] = inv
+	return true
 }
 
-func (s *Server) takeInvite(from, to uint64) invite {
+func (s *Server) takeInvite(from, to uint64) (invite, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	inv := s.invites[[2]uint64{from, to}]
-	delete(s.invites, [2]uint64{from, to})
-	return inv
+	key := [2]uint64{from, to}
+	inv, ok := s.invites[key]
+	if !ok || inv.answered {
+		return invite{}, false
+	}
+	inv.answered = true
+	s.invites[key] = inv
+	return inv, true
 }

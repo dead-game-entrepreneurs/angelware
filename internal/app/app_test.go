@@ -12,11 +12,13 @@ import (
 	"github.com/princebyyourlogic/angelware/internal/games/familyfeud"
 	"github.com/princebyyourlogic/angelware/internal/games/outrun2006"
 	"github.com/princebyyourlogic/angelware/internal/games/svr2007"
+	"github.com/princebyyourlogic/angelware/internal/games/wsop2008"
+	"github.com/princebyyourlogic/angelware/internal/protocol/dw/frame"
 	"github.com/princebyyourlogic/angelware/internal/storage"
 )
 
 func definitions() []game.Definition {
-	return []game.Definition{svr2007.Definition(), outrun2006.Definition(), codbro.Definition(), familyfeud.Definition()}
+	return []game.Definition{svr2007.Definition(), outrun2006.Definition(), codbro.Definition(), familyfeud.Definition(), wsop2008.Definition()}
 }
 
 func TestCommonSDKTransportAndDiscoveryOnlyChild(t *testing.T) {
@@ -176,5 +178,24 @@ func TestSharedDiscoveryResolvesAfterOwnerAndPreservesGameIsolation(t *testing.T
 				t.Fatal("ambiguous discovery sharing accepted")
 			}
 		})
+	}
+}
+
+func TestMMP3SharesExistingListeners(t *testing.T) {
+	c := Config{Games: []GameConfig{
+		{Game: svr2007.Key, Bind: "127.0.0.1", PublicIP: "127.0.0.1", STUN: Connectivity{Mode: stun.Adaptive}},
+		{Game: familyfeud.Key, Bind: "127.0.0.1", PublicIP: "127.0.0.1", STUN: Connectivity{ShareTransportWith: svr2007.Key}},
+		{Game: wsop2008.Key, Bind: "127.0.0.1", PublicIP: "127.0.0.1", STUN: Connectivity{ShareTransportWith: svr2007.Key}},
+	}}
+	a, err := buildForTest(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.TCP) != 1 || len(a.UDP) != 1 || len(a.UDP[0].Games) != 3 {
+		t.Fatal("MMP3 created duplicate listeners")
+	}
+	auth := a.TCP["127.0.0.1:3074"].Auth
+	if auth[wsop2008.TitleID].Protocol != frame.MMP3 || auth[svr2007.TitleID].Protocol != frame.Legacy || auth[familyfeud.TitleID].Protocol != frame.Legacy {
+		t.Fatal("incorrect protocol binding")
 	}
 }

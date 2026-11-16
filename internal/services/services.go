@@ -37,10 +37,13 @@ type Server struct {
 	Store       store.Store
 	Matchmaking *Matchmaking
 	Log         *slog.Logger
-	handlers    map[uint8]Handler
-	mu          sync.Mutex
-	online      map[uint64]*Conn
-	invites     map[[2]uint64]invite
+	// MessageFields selects a game's notification codec for both push and fetch.
+	// Nil uses the legacy shared codec.
+	MessageFields func(store.Message) []bitbuf.Field
+	handlers      map[uint8]Handler
+	mu            sync.Mutex
+	online        map[uint64]*Conn
+	invites       map[[2]uint64]invite
 }
 type Conn struct {
 	srv    *Server
@@ -105,7 +108,8 @@ func Fields(t Task) ([]bitbuf.Field, error) { return t.Args.Fields() }
 
 // push sends one mailbox message to this client right away, without blocking.
 func (c *Conn) push(m store.Message) {
-	if !c.client.TrySend(msgPush, pushPayload(m)) {
+	payload := bitbuf.NewWriter(true).Fields(c.srv.messageFields(m)).Bytes()
+	if !c.client.TrySend(msgPush, payload) {
 		c.log.Warn("push dropped: client queue full", "type", m.Type)
 	}
 }
@@ -126,11 +130,23 @@ func (s *Server) setOnline(ctx context.Context, c *Conn) {
 func (s *Server) setOffline(ctx context.Context, c *Conn) {
 	s.mu.Lock()
 	gone := s.online[c.sess.UserID] == c
+	var invitees []uint64
 	if gone {
 		delete(s.online, c.sess.UserID)
+		for key := range s.invites {
+			if key[0] == c.sess.UserID {
+				delete(s.invites, key)
+				invitees = append(invitees, key[1])
+			}
+		}
 	}
 	s.mu.Unlock()
 	if gone {
+		for _, to := range invitees {
+			if err := s.Store.ClearMessages(context.WithoutCancel(ctx), to, c.sess.UserID, msgInvite); err != nil {
+				s.Log.Error("clear disconnected host invitation", "err", err)
+			}
+		}
 		s.announce(context.WithoutCancel(ctx), c.sess, msgFriendOffline)
 	}
 }

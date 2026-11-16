@@ -1,7 +1,7 @@
 // Package bitbuf implements DemonWare's bdBitBuffer: bits packed least-significant first.
 //
 // The first bit of every buffer says whether fields carry 5-bit data-type markers.
-// Auth messages are untyped; lobby-service tasks are typed.
+// Legacy auth messages are untyped; MMP3 auth and lobby-service tasks are typed.
 package bitbuf
 
 import (
